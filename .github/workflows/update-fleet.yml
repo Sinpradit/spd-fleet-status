@@ -2,7 +2,7 @@ name: update-fleet-status
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 min (UTC); public repo = free unlimited
+    - cron: "13,43 * * * *"   # every 30 min at off-peak minutes (avoid :00/:30 congestion)
   workflow_dispatch:
 
 permissions:
