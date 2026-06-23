@@ -80,7 +80,7 @@ def pull_dtc(token):
 
 
 def download_fuel(sa_json):
-    info = json.loads(sa_json)
+    info = json.loads(sa_json.lstrip("﻿").strip())
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
     svc = gbuild("drive", "v3", credentials=creds, cache_discovery=False)
