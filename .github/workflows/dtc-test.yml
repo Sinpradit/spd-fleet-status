@@ -1,0 +1,20 @@
+name: dtc-reach-test
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl DTC getVehicleMaster from GitHub Actions runner
+        run: |
+          echo "Testing reachability to gps.dtc.co.th:8099 from GitHub-hosted runner..."
+          code=$(curl -k -s -o resp.json -w "%{http_code}" --max-time 30 \
+            -X POST "https://gps.dtc.co.th:8099/getVehicleMaster" \
+            -H "Content-Type: application/json" \
+            -d "{\"api_token_key\":\"${{ secrets.DTC_TOKEN }}\"}" || echo "CURL_FAIL")
+          echo "HTTP_CODE=$code"
+          echo "--- first 300 bytes of response ---"
+          head -c 300 resp.json || true
+          echo ""
+          if [ "$code" = "200" ]; then echo "RESULT: REACHABLE"; else echo "RESULT: BLOCKED_OR_FAIL"; fi
