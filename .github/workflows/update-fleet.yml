@@ -1,0 +1,45 @@
+name: update-fleet-status
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 min (UTC); public repo = free unlimited
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-fleet
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install --quiet openpyxl google-api-python-client google-auth
+
+      - name: Run pipeline
+        env:
+          DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        run: python pipeline/run.py
+
+      - name: Commit fleet-status.json if changed
+        run: |
+          git config user.name "fleet-bot"
+          git config user.email "actions@github.com"
+          if git status --porcelain | grep -q "fleet-status.json"; then
+            git add fleet-status.json
+            git commit -m "Update fleet-status.json [skip ci] $(date -u +%FT%TZ)"
+            git push
+            echo "pushed update"
+          else
+            echo "no change"
+          fi
