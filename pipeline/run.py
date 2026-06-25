@@ -45,13 +45,80 @@ DRIVER = {
 }
 
 PROV_IDX = {
-    "ศรีสะเกษ": 0, "อุบลราชธานี": 0, "อำนาจเจริญ": 0, "ยโสธร": 0, "สุรินทร์": 1,
+    "ศรีสะเกษ": 0, "อุบลราชธานี": 0, "อำนาจเจริญ": 0, "ยโสธร": 0, "ร้อยเอ็ด": 0,
+    "สุรินทร์": 1,
     "บุรีรัมย์": 2, "นครราชสีมา": 3, "สระแก้ว": 3, "สระบุรี": 4, "ปราจีนบุรี": 4,
     "นครนายก": 4, "พระนครศรีอยุธยา": 5, "ฉะเชิงเทรา": 5, "ลพบุรี": 5, "ปทุมธานี": 6,
-    "ชลบุรี": 6, "นนทบุรี": 7, "ระยอง": 7, "กรุงเทพมหานคร": 8, "จันทบุรี": 8,
-    "สมุทรปราการ": 9, "นครปฐม": 9, "สมุทรสาคร": 9, "ตราด": 9,
+    "ชลบุรี": 6, "นนทบุรี": 7, "ระยอง": 7, "สุพรรณบุรี": 8, "กรุงเทพมหานคร": 8,
+    "จันทบุรี": 8, "สมุทรปราการ": 9, "นครปฐม": 9, "สมุทรสาคร": 9, "ตราด": 9,
+    "กาญจนบุรี": 9,
 }
 HOME = {"ศรีสะเกษ", "อุบลราชธานี", "สุรินทร์"}
+
+# province-name aliases found inside route waypoints -> canonical province
+PROVINCE_ALIASES = {
+    "ศรีสะเกษ": "ศรีสะเกษ", "ศก": "ศรีสะเกษ", "อุบล": "อุบลราชธานี", "อบ": "อุบลราชธานี",
+    "สุรินทร์": "สุรินทร์", "บุรีรัมย์": "บุรีรัมย์", "นครราชสีมา": "นครราชสีมา",
+    "โคราช": "นครราชสีมา", "สระแก้ว": "สระแก้ว", "สระบุรี": "สระบุรี",
+    "ปราจีน": "ปราจีนบุรี", "ฉะเชิงเทรา": "ฉะเชิงเทรา", "อยุธยา": "พระนครศรีอยุธยา",
+    "ปทุมธานี": "ปทุมธานี", "นนทบุรี": "นนทบุรี", "ชลบุรี": "ชลบุรี", "ระยอง": "ระยอง",
+    "จันทบุรี": "จันทบุรี", "ตราด": "ตราด", "สมุทรปราการ": "สมุทรปราการ",
+    "สมุทรสาคร": "สมุทรสาคร", "นครปฐม": "นครปฐม", "สุพรรณบุรี": "สุพรรณบุรี",
+    "กาญ": "กาญจนบุรี", "กรุงเทพ": "กรุงเทพมหานคร", "กทม": "กรุงเทพมหานคร",
+    "ร้อยเอ็ด": "ร้อยเอ็ด", "ยโสธร": "ยโสธร", "อำนาจ": "อำนาจเจริญ",
+}
+
+# place/customer name (substring) -> province  (from truck-fleet-accounting place DB)
+PLACE_DB = {
+    "ยูนิเวอร์แซล": "สมุทรสาคร", "ยูนิทรินิตี้": "สมุทรปราการ", "ไทยลี": "สมุทรปราการ",
+    "กระชับมิตร": "สระบุรี", "จงเช่อ": "ระยอง", "แหลมฉบัง": "ชลบุรี",
+    "ราชสีมาไรซ์": "นครราชสีมา", "โคกกรวด": "นครราชสีมา", "นครหลวง": "พระนครศรีอยุธยา",
+    "คลอง7": "ปทุมธานี", "แคปปิตอล": "พระนครศรีอยุธยา", "บางไทร": "พระนครศรีอยุธยา",
+    "เอี่ยมศิริ": "ศรีสะเกษ", "บีบีพี": "สุรินทร์", "bbp": "สุรินทร์",
+    "เอี่ยมอุบล": "อุบลราชธานี", "ผักบุ้ง": "ศรีสะเกษ", "ย่งล้ง": "สุรินทร์",
+    "ชัยทิพย์": "สระบุรี", "สตึก": "บุรีรัมย์", "อุทัยโปรดิว": "สมุทรปราการ",
+    "บ้านโคก": "ศรีสะเกษ", "เฮียเหลา": "ชลบุรี", "อุบลอินเตอร์": "อุบลราชธานี",
+    "โตเต็ม": "ศรีสะเกษ", "เอี่ยมอีสาน": "อุบลราชธานี", "เอี่ยมอำนาจ": "อำนาจเจริญ",
+    "ธัญหิรัณย์": "ศรีสะเกษ", "ซันฟลาวเวอร์": "อุบลราชธานี", "สินทวีการเกษตร": "ศรีสะเกษ",
+    "ซินเคอหยวน": "ระยอง", "ประสิทธิ์ชัย": "อุบลราชธานี", "cps": "ศรีสะเกษ",
+    "หนองกี่": "บุรีรัมย์", "จงเจริญ": "ศรีสะเกษ", "ตั้งไพบูลย์": "ศรีสะเกษ",
+    "พัฒนกิจ": "ศรีสะเกษ", "ธัญกิจไรซ์": "ศรีสะเกษ", "แสงเจริญเขื่องใน": "อุบลราชธานี",
+    "แสงเจริญ": "ศรีสะเกษ", "เอกไรซ์": "อุบลราชธานี", "ส.เจริญกิจ": "ศรีสะเกษ",
+    "แซเอี้ยง": "ศรีสะเกษ", "โอแลม": "นนทบุรี", "บีวีซีเจริญทรัพย์": "สมุทรปราการ",
+    "ส.สินทวี": "ศรีสะเกษ", "โพนทราย": "ร้อยเอ็ด", "สุขสวัสดิ์ค้าไม้": "นนทบุรี",
+    "วัดมหาวงศ์": "สมุทรปราการ", "ทาทาระยอง": "ระยอง", "ทาทาบ่อวิน": "ชลบุรี",
+    "ปูนมอร์ต้า": "สระบุรี", "แก่งคอย": "สระบุรี", "สยามมอร์ตาร์": "สระบุรี",
+    "โชคชัยไพบูลย์": "ศรีสะเกษ", "มังกรทองปราสาท": "สุรินทร์", "สยามไฟเบอร์": "สระบุรี",
+    "ปุ๋ยกระต่าย": "พระนครศรีอยุธยา", "ดีซี": "ปทุมธานี", "ไทยบำรุง": "ศรีสะเกษ",
+    "สินประดิษฐ์การโยธา": "ศรีสะเกษ", "คำเขื่อนแก้วกรีน": "ศรีสะเกษ", "หนองแห่": "อำนาจเจริญ",
+    "ปราสาท": "สุรินทร์", "พูนศักดิ์": "สุรินทร์", "เมืองวัสดุ": "อุบลราชธานี",
+    "อุบลวัสดุ": "อุบลราชธานี", "เจียเม้ง": "ศรีสะเกษ", "ซีพีโนนคูณ": "ศรีสะเกษ",
+    "โนนคูณ": "ศรีสะเกษ", "พิบูล": "อุบลราชธานี", "บกด หนองแค": "สระบุรี",
+    "ซีแพ็คหนองแค": "สระบุรี", "หนองแค": "สระบุรี", "นอร์ทอีส": "สระบุรี",
+    "เตียเหลียง": "อุบลราชธานี", "ดูโฮม": "พระนครศรีอยุธยา",
+    # known districts -> province
+    "หน้าพระลาน": "สระบุรี", "เขื่องใน": "อุบลราชธานี", "บางกรวย": "นนทบุรี",
+    "บางบัวทอง": "นนทบุรี", "บางปะหัน": "พระนครศรีอยุธยา", "พระประแดง": "สมุทรปราการ",
+    "มหาชนะชัย": "ยโสธร", "กันทรารมย์": "ศรีสะเกษ", "วังน้อย": "พระนครศรีอยุธยา",
+    "บุณฑริก": "อุบลราชธานี", "บ่อวิน": "ชลบุรี",
+    # common spelling variants seen in the fuel file
+    "สมุทรปรากร": "สมุทรปราการ", "สมุทรปราการ": "สมุทรปราการ", "อยุธยา": "พระนครศรีอยุธยา",
+}
+_RESOLVE = {**PLACE_DB, **{k.lower(): v for k, v in PLACE_DB.items()},
+            **PROVINCE_ALIASES}
+_RESOLVE_KEYS = sorted(_RESOLVE, key=len, reverse=True)
+
+
+def resolve_province(name):
+    """Map a route waypoint (place/customer/province name) to a province."""
+    if not name:
+        return None
+    n = name.strip()
+    nl = n.lower()
+    for k in _RESOLVE_KEYS:
+        if k in n or k in nl:
+            return _RESOLVE[k]
+    return None
 THAI_MONTH = {1: "มค", 2: "กพ", 3: "มีค", 4: "เมย", 5: "พค", 6: "มิย",
               7: "กค", 8: "สค", 9: "กย", 10: "ตค", 11: "พย", 12: "ธค"}
 
@@ -131,7 +198,23 @@ def destination_of(route):
     return last or None
 
 
-def classify(vehicles, realtime, fuel, today):
+def route_waypoints(route):
+    """Cleaned non-empty waypoints; strip 'งาน[ลูกค้า]' suffix on each point."""
+    if not route:
+        return []
+    out = []
+    for p in route.split("-"):
+        p = p.strip()
+        if not p:
+            continue
+        if "งาน" in p:
+            p = p.split("งาน")[0].strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
     for r in realtime:
@@ -142,56 +225,93 @@ def classify(vehicles, realtime, fuel, today):
         group = GROUP_OF[num]
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
-        has_return = bool(route) and not route.rstrip().endswith("-")
-        dest = destination_of(route)
+        is_toy = bool(route) and route.strip().startswith("ทอย")
+        has_return = bool(route) and not route.rstrip().endswith("-") and not is_toy
+        disp_dest = destination_of(route)        # what the app shows
+        wps = route_waypoints(route)
+        # outbound destination = 2nd waypoint (จุดที่ 2); fall back to 1st/last
+        out_name = wps[1] if len(wps) >= 2 else (wps[-1] if wps else None)
+        idx_out = PROV_IDX.get(resolve_province(out_name)) if out_name else None
         driver = DRIVER.get(num, "")
         rt = rt_by_num.get(num)
+
         if rt is None:  # no GPS (e.g. 1163) -> file only
             cat = "find_outbound" if has_return else "find_return"
             reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
                       else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
             trucks.append(dict(number=num, driver=driver, group=group, category=cat,
                                gps_status="ไม่มี GPS", province=None, district=None,
-                               location_text="—", destination=dest, reason=reason, lat=None,
+                               location_text="—", destination=disp_dest, reason=reason, lat=None,
                                lon=None, speed=None, heading=None, updated=None,
                                from_file=True, stale=False))
             continue
+
         prov, dist = rt.get("province_th"), rt.get("district_th")
-        idx = province_index(prov)
+        idx_now = PROV_IDX.get(prov)
         try:
             heading = float(rt.get("heading")) if rt.get("heading") is not None else None
         except (TypeError, ValueError):
             heading = None
-        is_today = (fdate == today)
         head_out = heading is not None and 200 <= heading <= 340
-        if route and route.strip().startswith("ทอย"):
+        is_recent = fdate in recent_dates       # today or yesterday
+
+        if is_toy:                               # งานทอย — ใช้ตำแหน่ง GPS ล้วน
+            zi = idx_now if idx_now is not None else 5
             if prov in HOME:
                 cat, reason = "find_outbound", "งานทอย อยู่โซนบ้าน ว่างรับงานไป"
-            elif idx >= 3:
+            elif zi >= 3:
                 cat, reason = "find_return", "งานทอย อยู่โซนกลาง/ตะวันออก รอรับงานกลับ"
             elif head_out:
-                cat, reason = "find_return", "งานทอย กำลังมุ่งออก รอรับงานกลับ"
+                cat, reason = "find_return", "งานทอย มุ่งออก รอรับงานกลับ"
             else:
                 cat, reason = "find_outbound", "งานทอย มุ่งเข้าบ้าน ว่างรับงานไป"
-        elif not has_return:
-            if idx >= COUNT:
-                cat, reason = "find_return", "ถึง/เลยจุดนับขาไป ส่งของแล้ว รอรับงานกลับ"
-            elif is_today:
-                cat, reason = "working", "เพิ่งโหลดของออกขาไปวันนี้ ยังไม่ถึงปลายทาง"
-            else:
-                cat, reason = "find_outbound", "งานเก่าจบ กลับถึงบ้านแล้ว ว่าง"
-        else:
-            if idx <= 1:
-                if is_today and head_out:
-                    cat, reason = "working", "เพิ่งออกงานไกลวันนี้ (heading มุ่งออก)"
+        elif idx_now is None or idx_out is None:
+            # FALLBACK: map จังหวัดไม่ได้ → ใช้ logic โซนแบบเดิม (จุดนับ index 3)
+            if unknown is not None and idx_out is None and out_name:
+                unknown.add(out_name)
+            zi = idx_now if idx_now is not None else 5
+            if not has_return:
+                if zi >= COUNT:
+                    cat, reason = "find_return", "เลยจุดนับขาไป รอรับงานกลับ (ประเมินจากโซน)"
+                elif zi <= 1 and not is_recent:
+                    cat, reason = "find_outbound", "อยู่บ้าน งานเก่า → ว่าง (ประเมินจากโซน)"
                 else:
-                    cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
+                    cat, reason = "working", "กำลังไปส่ง (ประเมินจากโซน)"
             else:
-                cat, reason = "working", "กำลังขนกลับ / positioning"
+                if zi <= 1:
+                    cat, reason = (("working", "เพิ่งออกงาน (ประเมินจากโซน)") if
+                                   (is_recent and head_out) else
+                                   ("find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"))
+                else:
+                    cat, reason = "working", "กำลังขนกลับ (ประเมินจากโซน)"
+        else:
+            # ROUTE-PROGRESS: เทียบตำแหน่งรถกับปลายทางขาไปจริงของเที่ยวนี้
+            if not has_return:                    # รู้แค่ขาไป (ลงท้าย "-")
+                if idx_now >= idx_out:
+                    cat, reason = "find_return", f"ถึงปลายทางขาไป ({out_name}) แล้ว ส่งของแล้ว รอรับงานกลับ"
+                elif idx_now <= 1:
+                    if is_recent:
+                        cat, reason = "working", "รับงานขาไปแล้ว กำลังจะออก"
+                    else:
+                        cat, reason = "find_outbound", "ว่าง พร้อมรับงานไป"
+                else:
+                    cat, reason = "working", f"กำลังไปส่ง — ถึง {prov} แล้ว ยังไม่ถึง {out_name}"
+            else:                                 # มีงานกลับครบเที่ยว
+                if idx_now <= 1:                  # ถึงโซนบ้าน
+                    if is_recent and head_out:
+                        cat, reason = "working", "เพิ่งออกงานวันนี้ (มุ่งออก)"
+                    else:
+                        cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
+                elif head_out and idx_now < idx_out:
+                    cat, reason = "working", f"กำลังไปส่ง ({out_name})"
+                else:
+                    near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
+                    cat, reason = "working", "กำลังขนกลับ" + near
+
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
         trucks.append(dict(number=num, driver=driver, group=group, category=cat,
                            gps_status=rt.get("status_name_th") or "", province=prov,
-                           district=dist, location_text=loc, destination=dest, reason=reason,
+                           district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
                            heading=heading, updated=rt.get("time"), from_file=False, stale=False))
     return trucks
@@ -224,14 +344,18 @@ def main():
     sa_json = os.environ["GDRIVE_SA_KEY"]
     now = datetime.now(timezone(timedelta(hours=7)))
     today = thai_today(now)
+    recent_dates = {today, thai_today(now - timedelta(days=1))}  # today + yesterday
     vehicles, realtime = pull_dtc(token)
     fuel = parse_fuel(download_fuel(sa_json))
-    trucks = classify(vehicles, realtime, fuel, today)
+    unknown = set()
+    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown)
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
-    print(f"today={today} vehicles={len(vehicles)} realtime={len(realtime)} "
-          f"trucks={len(trucks)} summary={doc['summary']}")
+    print(f"today={today} recent={sorted(recent_dates)} vehicles={len(vehicles)} "
+          f"realtime={len(realtime)} trucks={len(trucks)} summary={doc['summary']}")
+    if unknown:
+        print("UNKNOWN destinations (fell back to zone logic):", ", ".join(sorted(unknown)))
 
 
 if __name__ == "__main__":
