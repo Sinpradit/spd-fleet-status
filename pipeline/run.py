@@ -8,7 +8,9 @@ Secrets via env: DTC_TOKEN, GDRIVE_SA_KEY (service-account JSON string).
 import base64
 import io
 import json
+import math
 import os
+import re
 import ssl
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -102,7 +104,8 @@ PLACE_DB = {
     "มหาชนะชัย": "ยโสธร", "กันทรารมย์": "ศรีสะเกษ", "วังน้อย": "พระนครศรีอยุธยา",
     "บุณฑริก": "อุบลราชธานี", "บ่อวิน": "ชลบุรี",
     # common spelling variants seen in the fuel file
-    "สมุทรปรากร": "สมุทรปราการ", "สมุทรปราการ": "สมุทรปราการ", "อยุธยา": "พระนครศรีอยุธยา",
+    "สมุทรปรากร": "สมุทรปราการ", "สมุทปราการ": "สมุทรปราการ",
+    "สมุทรปราการ": "สมุทรปราการ", "อยุธยา": "พระนครศรีอยุธยา",
 }
 _RESOLVE = {**PLACE_DB, **{k.lower(): v for k, v in PLACE_DB.items()},
             **PROVINCE_ALIASES}
@@ -121,6 +124,136 @@ def resolve_province(name):
     return None
 THAI_MONTH = {1: "มค", 2: "กพ", 3: "มีค", 4: "เมย", 5: "พค", 6: "มิย",
               7: "กค", 8: "สค", 9: "กย", 10: "ตค", 11: "พย", 12: "ธค"}
+
+# ---------- DTC stations (POI) + ETA ----------
+# route-waypoint substring -> POI name (normalized, no spaces) for arrival/ETA
+DEST_POI = {
+    "นนทบุรี": "เจียเม้งนนทบุรี",
+    "แก่งคอย": "สยามมอร์ตาร์แก่งคอย2", "สยามมอร์ตาร์": "สยามมอร์ตาร์แก่งคอย2",
+    "ปูนมอร์ต้า": "สยามมอร์ตาร์แก่งคอย2",
+    "นครหลวง": "ซีพีนครหลวง", "ซีพีนครหลวง": "ซีพีนครหลวง",
+    "บีบีพี": "BBPRiceMill", "bbp": "BBPRiceMill",
+    "ดีซี": "ศูนย์กระจายสินค้าดูโฮมลำลูกกา", "ลำลูกกา": "ศูนย์กระจายสินค้าดูโฮมลำลูกกา",
+    "ดูโฮมอยุธยา": "ดูโฮมอยุธยา", "ดูโฮม อยุธยา": "ดูโฮมอยุธยา",
+    "ทีเจ": "บริษัททีเจครอปอยุธยาจำกัด",
+}
+HOME_POI = "สินประดิษฐ์"          # ฐานบ้าน — ใช้คิด ETA ขากลับ
+TRUCK_FACTOR = 1.2                 # รถบรรทุกช้ากว่าเวลารถเก๋งของ OSRM
+
+
+def _norm(s):
+    return re.sub(r"\s+", "", s or "")
+
+
+def fetch_pois(token):
+    """DTC POIs -> {norm_name: {name, lat, lon, radius, poly:[(lat,lon)..]}}
+    Circle (type C) has lat/lon+area_m; polygon (type P) has WKT geo_polygon."""
+    try:
+        d = dtc_post("/getPOI", {"api_token_key": token})
+    except Exception:
+        return {}
+    out = {}
+    for p in d.get("data", []):
+        name = (p.get("poi_name") or "").strip()
+        if not name:
+            continue
+        key = _norm(name)
+        st = out.setdefault(key, {"name": name, "lat": None, "lon": None,
+                                  "radius": 0, "poly": None})
+        try:
+            lat, lon = float(p.get("lat") or 0), float(p.get("lon") or 0)
+        except (TypeError, ValueError):
+            lat = lon = 0
+        if lat and lon:                       # circle point
+            st["name"] = name                 # prefer point-style entry's name
+            st["lat"], st["lon"] = lat, lon
+            try:
+                st["radius"] = max(float(p.get("area_m") or 0), 150)
+            except (TypeError, ValueError):
+                st["radius"] = 200
+        gp = p.get("geo_polygon") or ""
+        nums = re.findall(r"(-?\d+\.?\d*)\s+(-?\d+\.?\d*)", gp)
+        if nums:
+            poly = [(float(la), float(lo)) for lo, la in nums]   # WKT = lon lat
+            st["poly"] = poly
+            if not st["lat"]:                 # centroid as reference point
+                st["lat"] = sum(x for x, _ in poly) / len(poly)
+                st["lon"] = sum(y for _, y in poly) / len(poly)
+    return out
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _in_poly(lat, lon, poly):
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        la1, lo1 = poly[i]
+        la2, lo2 = poly[(i + 1) % n]
+        if (lo1 > lon) != (lo2 > lon):
+            t = (lon - lo1) / (lo2 - lo1)
+            if lat < la1 + t * (la2 - la1):
+                inside = not inside
+    return inside
+
+
+def station_of(lat, lon, pois):
+    """POI display-name the point is inside (polygon, or within circle radius
+    + small buffer), else None."""
+    for st in pois.values():
+        if st["poly"] and _in_poly(lat, lon, st["poly"]):
+            return st["name"]
+        if st["lat"] and _haversine_m(lat, lon, st["lat"], st["lon"]) <= (st["radius"] or 200) + 100:
+            return st["name"]
+    return None
+
+
+def match_dest_poi(out_name, pois):
+    if not out_name:
+        return None
+    n, nl = _norm(out_name), _norm(out_name).lower()
+    for k in sorted(DEST_POI, key=len, reverse=True):
+        if _norm(k) in n or _norm(k) in nl:
+            return pois.get(_norm(DEST_POI[k]))
+    return None
+
+
+_osrm_fail = 0
+
+
+def osrm_eta_hours(lat1, lon1, lat2, lon2):
+    """Driving hours (truck-adjusted) via OSRM public server; None on failure."""
+    global _osrm_fail
+    if _osrm_fail >= 2:                       # server down → stop trying this run
+        return None
+    url = (f"https://router.project-osrm.org/route/v1/driving/"
+           f"{lon1},{lat1};{lon2},{lat2}?overview=false")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "spd-fleetview"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        sec = d["routes"][0]["duration"]
+        _osrm_fail = 0
+        return sec / 3600.0 * TRUCK_FACTOR
+    except Exception:
+        _osrm_fail += 1
+        return None
+
+
+def fmt_eta(h):
+    if h is None:
+        return None
+    if h < 0.95:
+        m = max(int(round(h * 60 / 10.0) * 10), 10)
+        return f"~{m} นาที"
+    half = round(h * 2) / 2
+    return f"~{half:g} ชม."
 
 _ctx = ssl.create_default_context()
 _ctx.check_hostname = False
@@ -214,7 +347,8 @@ def route_waypoints(route):
     return out
 
 
-def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
+def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None):
+    pois = pois or {}
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
     for r in realtime:
@@ -254,6 +388,14 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
             heading = None
         head_out = heading is not None and 200 <= heading <= 340
         is_recent = fdate in recent_dates       # today or yesterday
+        # --- station awareness (DTC POI) ---
+        try:
+            tlat, tlon = float(rt.get("lat") or 0), float(rt.get("lon") or 0)
+        except (TypeError, ValueError):
+            tlat = tlon = 0
+        at_st = station_of(tlat, tlon, pois) if (tlat and tlon) else None
+        dest_poi = match_dest_poi(out_name, pois) if not is_toy else None
+        at_dest = bool(at_st and dest_poi and _norm(at_st) == _norm(dest_poi["name"]))
 
         if is_toy:                               # งานทอย — ใช้ตำแหน่ง GPS ล้วน
             zi = idx_now if idx_now is not None else 5
@@ -287,7 +429,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
         else:
             # ROUTE-PROGRESS: เทียบตำแหน่งรถกับปลายทางขาไปจริงของเที่ยวนี้
             if not has_return:                    # รู้แค่ขาไป (ลงท้าย "-")
-                if idx_now >= idx_out:
+                if at_dest:                       # อยู่ในสถานีปลายทางจริง (POI)
+                    cat, reason = "find_return", f"ถึง {at_st} แล้ว — ส่งของแล้ว รอรับงานกลับ"
+                elif idx_now >= idx_out:
                     cat, reason = "find_return", f"ถึงปลายทางขาไป ({out_name}) แล้ว ส่งของแล้ว รอรับงานกลับ"
                 elif idx_now <= 1:
                     if is_recent:
@@ -297,7 +441,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
                 else:
                     cat, reason = "working", f"กำลังไปส่ง — ถึง {prov} แล้ว ยังไม่ถึง {out_name}"
             else:                                 # มีงานกลับครบเที่ยว
-                if idx_now <= 1:                  # ถึงโซนบ้าน
+                if at_dest:
+                    cat, reason = "working", f"อยู่ที่ {at_st} — ส่งของ (มีงานกลับต่อ)"
+                elif idx_now <= 1:                # ถึงโซนบ้าน
                     if is_recent and head_out:
                         cat, reason = "working", "เพิ่งออกงานวันนี้ (มุ่งออก)"
                     else:
@@ -308,12 +454,32 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None):
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
 
+        # --- ETA ต่อท้ายเหตุผล (เฉพาะรถที่กำลังวิ่งงาน) ---
+        eta_h = None
+        if cat == "working" and tlat and tlon and not is_toy:
+            if "กำลังไปส่ง" in reason and dest_poi and dest_poi.get("lat") and not at_dest:
+                eta_h = osrm_eta_hours(tlat, tlon, dest_poi["lat"], dest_poi["lon"])
+                e = fmt_eta(eta_h)
+                if e:
+                    reason += f" · อีก {e} ถึง {dest_poi['name']}"
+            elif "ขนกลับ" in reason:
+                home = pois.get(_norm(HOME_POI))
+                if home and home.get("lat"):
+                    eta_h = osrm_eta_hours(tlat, tlon, home["lat"], home["lon"])
+                    e = fmt_eta(eta_h)
+                    if e:
+                        reason += f" · อีก {e} ถึงบ้าน"
+        # รถจอดอยู่ในสถานีอื่นที่รู้จัก (ไม่ใช่ปลายทาง) → บอกไว้
+        if at_st and at_st not in reason:
+            reason += f" · 📍{at_st}"
+
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
         trucks.append(dict(number=num, driver=driver, group=group, category=cat,
                            gps_status=rt.get("status_name_th") or "", province=prov,
                            district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
-                           heading=heading, updated=rt.get("time"), from_file=False, stale=False))
+                           heading=heading, updated=rt.get("time"), from_file=False, stale=False,
+                           at_station=at_st, eta_hours=(round(eta_h, 1) if eta_h else None)))
     return trucks
 
 
@@ -347,13 +513,17 @@ def main():
     recent_dates = {today, thai_today(now - timedelta(days=1))}  # today + yesterday
     vehicles, realtime = pull_dtc(token)
     fuel = parse_fuel(download_fuel(sa_json))
+    pois = fetch_pois(token)
     unknown = set()
-    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown)
+    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois)
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
+    n_eta = sum(1 for t in trucks if t.get("eta_hours"))
+    n_st = sum(1 for t in trucks if t.get("at_station"))
     print(f"today={today} recent={sorted(recent_dates)} vehicles={len(vehicles)} "
-          f"realtime={len(realtime)} trucks={len(trucks)} summary={doc['summary']}")
+          f"realtime={len(realtime)} trucks={len(trucks)} pois={len(pois)} "
+          f"at_station={n_st} eta={n_eta} summary={doc['summary']}")
     if unknown:
         print("UNKNOWN destinations (fell back to zone logic):", ", ".join(sorted(unknown)))
 
