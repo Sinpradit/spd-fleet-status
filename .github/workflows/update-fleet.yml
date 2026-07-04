@@ -38,8 +38,12 @@ jobs:
           if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl"; then
             git add fleet-status.json tracks.json gps2-history.jsonl 2>/dev/null || git add fleet-status.json tracks.json
             git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
-            git push
-            echo "pushed update"
+            for i in 1 2 3; do
+              git push && { echo "pushed update"; exit 0; }
+              echo "push rejected, rebasing (attempt $i)"
+              git pull --rebase -X theirs origin main
+            done
+            git push && echo "pushed update (final)" || { echo "push failed after retries"; exit 1; }
           else
             echo "no change"
           fi
