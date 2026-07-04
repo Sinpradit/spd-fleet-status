@@ -303,6 +303,58 @@ def pull_dtc(token):
     return vehicles, rt.get("data", [])
 
 
+def fetch_history(token, gps_id, start, end):
+    """จุดพิกัดย้อนหลังของรถ 1 คัน (DTC /getHistory) — list ของ dict ต่อจุด"""
+    try:
+        d = dtc_post("/getHistory", {"api_token_key": token, "gps_id": gps_id,
+                                     "start_period": start, "end_period": end})
+        return d.get("data", []) or []
+    except Exception:
+        return []
+
+
+def downsample(points, max_pts=150):
+    if len(points) <= max_pts:
+        return points
+    step = len(points) / max_pts
+    out = [points[int(i * step)] for i in range(max_pts)]
+    if out[-1] is not points[-1]:
+        out.append(points[-1])
+    return out
+
+
+def build_tracks(token, vehicles, roster, now):
+    """เส้นทางที่วิ่ง 'วันนี้' ของทุกคัน (สำหรับหน้าแผนที่ในแอป) -> tracks.json
+    ต่อคัน: จุด [lat, lon, "HH:MM", speed] ตั้งแต่เที่ยงคืนถึงตอนนี้ (downsample ~150 จุด)"""
+    gps_by_num = {v["vehicle_name"].replace("70-", ""): v["gps_id"] for v in vehicles}
+    start = now.strftime("%Y-%m-%d 00:00:00")
+    end = now.strftime("%Y-%m-%d %H:%M:%S")
+    tracks = {}
+    for num in roster:
+        gid = gps_by_num.get(num)
+        if not gid:
+            continue
+        pts = fetch_history(token, gid, start, end)
+        cleaned = []
+        for p in pts:
+            try:
+                la, lo = float(p.get("lat") or 0), float(p.get("lon") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not la or not lo:
+                continue
+            t = (p.get("time") or "")[11:16]          # "HH:MM"
+            try:
+                sp = int(float(p.get("gps_speed") or 0))
+            except (TypeError, ValueError):
+                sp = 0
+            cleaned.append([round(la, 5), round(lo, 5), t, sp])
+        if cleaned:
+            tracks[num] = downsample(cleaned)
+    return {"generated_at": now.isoformat(), "date": now.strftime("%Y-%m-%d"),
+            "tracks": tracks}
+
+
 def drive_service(sa_json):
     info = json.loads(sa_json.lstrip("﻿").strip())
     creds = service_account.Credentials.from_service_account_info(
@@ -590,6 +642,15 @@ def main():
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
+    # เส้นทางที่วิ่งวันนี้ (สำหรับหน้าแผนที่) — พังก็ไม่ล้มรอบหลัก
+    try:
+        fleet_nums = sorted((set(roster) if roster else set(GROUP_OF)) - EXCLUDE)
+        tr = build_tracks(token, vehicles, fleet_nums, now)
+        with open("tracks.json", "w", encoding="utf-8") as f:
+            json.dump(tr, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"tracks: {len(tr['tracks'])} trucks")
+    except Exception as e:
+        print("WARN: build_tracks failed ->", repr(e))
     n_eta = sum(1 for t in trucks if t.get("eta_hours"))
     n_st = sum(1 for t in trucks if t.get("at_station"))
     src = f"master-file({len(roster)})" if roster else "code-fallback"

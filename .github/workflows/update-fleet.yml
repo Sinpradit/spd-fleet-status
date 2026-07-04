@@ -31,13 +31,13 @@ jobs:
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
         run: python pipeline/run.py
 
-      - name: Commit fleet-status.json if changed
+      - name: Commit data files if changed
         run: |
           git config user.name "fleet-bot"
           git config user.email "actions@github.com"
-          if git status --porcelain | grep -q "fleet-status.json"; then
-            git add fleet-status.json
-            git commit -m "Update fleet-status.json [skip ci] $(date -u +%FT%TZ)"
+          if git status --porcelain | grep -qE "fleet-status.json|tracks.json"; then
+            git add fleet-status.json tracks.json
+            git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
             git push
             echo "pushed update"
           else
