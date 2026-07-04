@@ -773,6 +773,36 @@ def main():
     try:
         fleet_nums = sorted((set(roster) if roster else set(GROUP_OF)) - EXCLUDE)
         tr = build_tracks(token, vehicles, fleet_nums, now)
+        # รถ GPS เจ้าที่ 2: สร้างเส้นทางจากประวัติที่เราสะสมเอง (gps2-history.jsonl)
+        try:
+            today_str = now.strftime("%Y-%m-%d")
+            g2pts = {}
+            with open("gps2-history.jsonl", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    tm = str(rec.get("time") or "")
+                    if not tm.startswith(today_str):
+                        continue
+                    num = rec.get("num")
+                    la, lo = rec.get("lat"), rec.get("lon")
+                    if not (num and la and lo):
+                        continue
+                    fu = rec.get("fuel")
+                    g2pts.setdefault(num, {})[tm] = [round(float(la), 5),
+                                                     round(float(lo), 5),
+                                                     tm[11:16],
+                                                     int(rec.get("speed") or 0),
+                                                     (int(fu) if fu is not None else None)]
+            for num, bym in g2pts.items():
+                if num not in tr["tracks"]:
+                    pts = [bym[k] for k in sorted(bym)]
+                    if pts:
+                        tr["tracks"][num] = downsample(pts)
+        except FileNotFoundError:
+            pass
         with open("tracks.json", "w", encoding="utf-8") as f:
             json.dump(tr, f, ensure_ascii=False, separators=(",", ":"))
         print(f"tracks: {len(tr['tracks'])} trucks")
