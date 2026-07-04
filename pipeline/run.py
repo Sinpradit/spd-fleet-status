@@ -348,7 +348,16 @@ def build_tracks(token, vehicles, roster, now):
                 sp = int(float(p.get("gps_speed") or 0))
             except (TypeError, ValueError):
                 sp = 0
-            cleaned.append([round(la, 5), round(lo, 5), t, sp])
+            # น้ำมัน "75/100" -> 75 ; NaN/ไม่มีเซนเซอร์ -> None
+            fuel = None
+            o = str(p.get("oil") or "")
+            if "/" in o:
+                head = o.split("/")[0]
+                try:
+                    fuel = int(float(head))
+                except (TypeError, ValueError):
+                    fuel = None
+            cleaned.append([round(la, 5), round(lo, 5), t, sp, fuel])
         if cleaned:
             tracks[num] = downsample(cleaned)
     return {"generated_at": now.isoformat(), "date": now.strftime("%Y-%m-%d"),
