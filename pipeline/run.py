@@ -25,7 +25,32 @@ DTC_BASE = "https://gps.dtc.co.th:8099"
 FUEL_FILE_ID = "1tf9x5I7ombD15wV-89KRLn-F_7Kco7MA"
 # ไฟล์แม่แบบรถ+คนขับ (Google Sheet "ทะเบียน-คนขับ-สินประดิษฐ์") — เพิ่ม/ลบรถ แก้คนขับ ที่นี่ที่เดียว
 MASTER_FILE_ID = "1PoZlg99nOb6zuGJto95ibMyv-4_9f3CGNlHUqBZexIM"
+# ไฟล์ข้อมูล GPS เจ้าที่ 2 (vendor POST เข้า webhook ทุก 30 นาที)
+GPS2_FILE_ID = "1IXj3cR32oGcecXvledIlFV0O5lKvX-fV"
+# แผนที่ VIN -> เลขรถ (เติมเมื่อ vendor ยืนยัน / เปลี่ยน label เป็นทะเบียนแล้วไม่ต้องใช้)
+GPS2_VIN_MAP = {
+    # "MP1GXZ77NRT001113": "4100",
+    # "MP1GXZ77NRT001115": "4102",
+}
 COUNT = 3
+
+# จุดกึ่งกลางจังหวัด (คร่าว ๆ) — แปลงพิกัด GPS เจ้าที่ 2 เป็นจังหวัด
+PROV_CENTROIDS = {
+    "ศรีสะเกษ": (15.12, 104.32), "อุบลราชธานี": (15.24, 104.85),
+    "อำนาจเจริญ": (15.86, 104.63), "ยโสธร": (15.79, 104.15),
+    "ร้อยเอ็ด": (16.05, 103.65), "สุรินทร์": (14.88, 103.49),
+    "บุรีรัมย์": (14.99, 103.10), "นครราชสีมา": (14.97, 102.10),
+    "สระแก้ว": (13.82, 102.07), "สระบุรี": (14.53, 100.91),
+    "ปราจีนบุรี": (14.05, 101.37), "นครนายก": (14.20, 101.21),
+    "พระนครศรีอยุธยา": (14.35, 100.57), "ฉะเชิงเทรา": (13.69, 101.07),
+    "ลพบุรี": (14.80, 100.65), "ปทุมธานี": (14.02, 100.53),
+    "ชลบุรี": (13.36, 100.98), "นนทบุรี": (13.86, 100.51),
+    "ระยอง": (12.68, 101.28), "สุพรรณบุรี": (14.47, 100.12),
+    "กรุงเทพมหานคร": (13.75, 100.50), "จันทบุรี": (12.61, 102.10),
+    "สมุทรปราการ": (13.60, 100.60), "นครปฐม": (13.82, 100.06),
+    "สมุทรสาคร": (13.55, 100.27), "ตราด": (12.24, 102.51),
+    "กาญจนบุรี": (14.02, 99.53),
+}
 
 GROUPS = {
     "dump": ["1290", "1571", "2270", "2943"],
@@ -441,6 +466,74 @@ def province_index(prov):
     return PROV_IDX.get(prov, 5)
 
 
+def province_from_coords(lat, lon, max_km=90):
+    """จังหวัดโดยประมาณจากพิกัด (เทียบจุดกึ่งกลางจังหวัดที่ใกล้สุด)"""
+    best, bd = None, None
+    for prov, (la, lo) in PROV_CENTROIDS.items():
+        d = _haversine_m(lat, lon, la, lo)
+        if bd is None or d < bd:
+            best, bd = prov, d
+    return best if (bd is not None and bd <= max_km * 1000) else None
+
+
+def fetch_gps2(svc, now):
+    """อ่านข้อมูล GPS เจ้าที่ 2 จาก Drive (webhook เขียนไว้) -> {เลขรถ: record แบบ DTC}
+    คืน {} ถ้าอ่านไม่ได้/ข้อมูลเก่าเกิน 3 ชม."""
+    try:
+        buf = io.BytesIO()
+        dl = MediaIoBaseDownload(buf, svc.files().get_media(fileId=GPS2_FILE_ID))
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        wrapper = json.loads(buf.getvalue().decode("utf-8-sig"))
+        payload = wrapper.get("payload")
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        vehicles = (payload or {}).get("vehicles", [])
+        # อายุข้อมูล (received_at เป็น UTC)
+        age_min = None
+        try:
+            ra = wrapper.get("received_at", "")
+            rt_utc = datetime.strptime(ra[:19], "%Y-%m-%dT%H:%M:%S").replace(
+                tzinfo=timezone.utc)
+            age_min = (now - rt_utc).total_seconds() / 60
+        except Exception:
+            pass
+        if age_min is not None and age_min > 180:
+            print(f"WARN: gps2 data stale ({age_min:.0f} min) -> skip")
+            return {}
+        out = {}
+        for v in vehicles:
+            plate = str(v.get("plate") or "")
+            m = re.match(r"\s*70-(\d+)", plate)
+            num = m.group(1) if m else GPS2_VIN_MAP.get(plate.strip())
+            if not num:
+                continue
+            try:
+                la, lo = float(v.get("lat") or 0), float(v.get("lon") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not la or not lo:
+                continue
+            try:
+                sp = float(v.get("speed") or 0)
+            except (TypeError, ValueError):
+                sp = 0
+            prov = province_from_coords(la, lo)
+            out[num] = {
+                "truck_name": f"70-{num}", "lat": la, "lon": lo,
+                "gps_speed": round(sp), "heading": v.get("heading"),
+                "time": v.get("time"), "province_th": prov, "district_th": None,
+                "status_name_th": "รถวิ่ง" if sp > 5 else "รถจอด",
+                "_gps2": True, "_fuel": v.get("fuel"),
+                "_stale": bool(age_min is not None and age_min > 90),
+            }
+        return out
+    except Exception as e:
+        print("WARN: fetch_gps2 failed ->", repr(e))
+        return {}
+
+
 def destination_of(route):
     if not route:
         return None
@@ -468,13 +561,17 @@ def route_waypoints(route):
 
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
-             roster=None, drivers=None):
+             roster=None, drivers=None, gps2=None):
     pois = pois or {}
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
     for r in realtime:
         num = (r.get("truck_name") or "").replace("70-", "") or num_by_gps.get(r.get("gps_id"), "")
         rt_by_num[num] = r
+    # เติมรถจาก GPS เจ้าที่ 2 (เฉพาะคันที่ DTC ไม่มี)
+    for num, r in (gps2 or {}).items():
+        if num not in rt_by_num:
+            rt_by_num[num] = r
     trucks = []
     fleet = set(roster) if roster else set(GROUP_OF)   # roster จากไฟล์แม่แบบ (fallback: โค้ด)
     for num in sorted(fleet - EXCLUDE):
@@ -603,13 +700,20 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         if at_st and at_st not in reason:
             reason += f" · 📍{at_st}"
 
+        is_gps2 = bool(rt.get("_gps2"))
+        if is_gps2:
+            reason += " · GPS เจ้าที่ 2"
+            if rt.get("_stale"):
+                reason += f" (ข้อมูลเมื่อ {(rt.get('time') or '')[11:16]})"
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
         trucks.append(dict(number=num, driver=driver, group=group, category=cat,
                            gps_status=rt.get("status_name_th") or "", province=prov,
                            district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
-                           heading=heading, updated=rt.get("time"), from_file=False, stale=False,
-                           at_station=at_st, eta_hours=(round(eta_h, 1) if eta_h else None)))
+                           heading=heading, updated=rt.get("time"), from_file=False,
+                           stale=bool(rt.get("_stale")),
+                           at_station=at_st, eta_hours=(round(eta_h, 1) if eta_h else None),
+                           fuel=rt.get("_fuel")))
     return trucks
 
 
@@ -646,8 +750,22 @@ def main():
     fuel = parse_fuel(download_fuel(svc))
     pois = fetch_pois(token)
     roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
+    gps2 = fetch_gps2(svc, now)              # รถ GPS เจ้าที่ 2 (webhook -> Drive)
     unknown = set()
-    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois, roster, drivers)
+    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
+                      roster, drivers, gps2)
+    # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
+    try:
+        if gps2:
+            with open("gps2-history.jsonl", "a", encoding="utf-8") as f:
+                for num, r in gps2.items():
+                    f.write(json.dumps({"num": num, "time": r.get("time"),
+                                        "lat": r.get("lat"), "lon": r.get("lon"),
+                                        "speed": r.get("gps_speed"),
+                                        "fuel": r.get("_fuel")},
+                                       ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("WARN: gps2 history append failed ->", repr(e))
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
