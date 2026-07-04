@@ -520,12 +520,16 @@ def fetch_gps2(svc, now):
             except (TypeError, ValueError):
                 sp = 0
             prov = province_from_coords(la, lo)
+            try:
+                fuel = int(float(v.get("fuel")))     # กันเคส vendor ส่งเป็น string
+            except (TypeError, ValueError):
+                fuel = None
             out[num] = {
                 "truck_name": f"70-{num}", "lat": la, "lon": lo,
                 "gps_speed": round(sp), "heading": v.get("heading"),
                 "time": v.get("time"), "province_th": prov, "district_th": None,
                 "status_name_th": "รถวิ่ง" if sp > 5 else "รถจอด",
-                "_gps2": True, "_fuel": v.get("fuel"),
+                "_gps2": True, "_fuel": fuel,
                 "_stale": bool(age_min is not None and age_min > 90),
             }
         return out
