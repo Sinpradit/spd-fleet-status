@@ -23,6 +23,8 @@ from googleapiclient.http import MediaIoBaseDownload
 # ---------- constants ----------
 DTC_BASE = "https://gps.dtc.co.th:8099"
 FUEL_FILE_ID = "1tf9x5I7ombD15wV-89KRLn-F_7Kco7MA"
+# ไฟล์แม่แบบรถ+คนขับ (Google Sheet "ทะเบียน-คนขับ-สินประดิษฐ์") — เพิ่ม/ลบรถ แก้คนขับ ที่นี่ที่เดียว
+MASTER_FILE_ID = "1PoZlg99nOb6zuGJto95ibMyv-4_9f3CGNlHUqBZexIM"
 COUNT = 3
 
 GROUPS = {
@@ -32,8 +34,8 @@ GROUPS = {
                 "3001", "3066", "3070", "3604", "3606", "3608", "3610", "3637", "3971"],
 }
 GROUP_OF = {n: g for g, ns in GROUPS.items() for n in ns}
-GROUP_LABEL = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ"}
-GROUP_ORDER = ["dump", "pen", "flatbed"]
+GROUP_LABEL = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ", "other": "ไม่ระบุกลุ่ม"}
+GROUP_ORDER = ["dump", "pen", "flatbed", "other"]
 CAT_ORDER = ["find_outbound", "find_return", "working"]
 CAT_LABEL = {"find_outbound": "หางานไป", "find_return": "หางานกลับ", "working": "อยู่ระหว่างทำงาน"}
 EXCLUDE = {"2168", "1288", "1250"}
@@ -300,11 +302,14 @@ def pull_dtc(token):
     return vehicles, rt.get("data", [])
 
 
-def download_fuel(sa_json):
+def drive_service(sa_json):
     info = json.loads(sa_json.lstrip("﻿").strip())
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
-    svc = gbuild("drive", "v3", credentials=creds, cache_discovery=False)
+    return gbuild("drive", "v3", credentials=creds, cache_discovery=False)
+
+
+def download_fuel(svc):
     buf = io.BytesIO()
     dl = MediaIoBaseDownload(buf, svc.files().get_media(fileId=FUEL_FILE_ID))
     done = False
@@ -312,6 +317,38 @@ def download_fuel(sa_json):
         _, done = dl.next_chunk()
     buf.seek(0)
     return buf
+
+
+def fetch_master(svc):
+    """อ่านไฟล์แม่แบบรถ+คนขับ (Google Sheet -> CSV):
+    คอลัมน์ A=ทะเบียน ("70-1163/1164"), B=ชื่อเล่น, C=ชื่อจริง
+    คืน (roster:list[เลขรถ], drivers:{เลขรถ: ชื่อเล่น}) — คืน (None, None) ถ้าอ่านไม่ได้
+    เพิ่ม/ลบแถวในไฟล์ = รถเข้า-ออกระบบอัตโนมัติรอบถัดไป"""
+    try:
+        buf = io.BytesIO()
+        dl = MediaIoBaseDownload(buf, svc.files().export_media(
+            fileId=MASTER_FILE_ID, mimeType="text/csv"))
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        text = buf.getvalue().decode("utf-8-sig")
+        import csv as _csv
+        roster, drivers = [], {}
+        for row in _csv.reader(io.StringIO(text)):
+            if not row:
+                continue
+            m = re.match(r"\s*70-(\d+)", row[0] or "")
+            if not m:
+                continue
+            num = m.group(1)
+            roster.append(num)
+            nick = (row[1].strip() if len(row) > 1 and row[1] else "")
+            if nick:
+                drivers[num] = nick
+        return (roster, drivers) if roster else (None, None)
+    except Exception as e:
+        print("WARN: fetch_master failed ->", repr(e))
+        return None, None
 
 
 def parse_fuel(xlsx_buf):
@@ -368,7 +405,8 @@ def route_waypoints(route):
     return out
 
 
-def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None):
+def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
+             roster=None, drivers=None):
     pois = pois or {}
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
@@ -376,8 +414,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None):
         num = (r.get("truck_name") or "").replace("70-", "") or num_by_gps.get(r.get("gps_id"), "")
         rt_by_num[num] = r
     trucks = []
-    for num in sorted(set(GROUP_OF) - EXCLUDE):
-        group = GROUP_OF[num]
+    fleet = set(roster) if roster else set(GROUP_OF)   # roster จากไฟล์แม่แบบ (fallback: โค้ด)
+    for num in sorted(fleet - EXCLUDE):
+        group = GROUP_OF.get(num, "other")             # รถใหม่ยังไม่ระบุกลุ่ม -> "ไม่ระบุกลุ่ม"
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
         is_toy = bool(route) and route.strip().startswith("ทอย")
@@ -387,10 +426,18 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None):
         # outbound destination = 2nd waypoint (จุดที่ 2); fall back to 1st/last
         out_name = wps[1] if len(wps) >= 2 else (wps[-1] if wps else None)
         idx_out = PROV_IDX.get(resolve_province(out_name)) if out_name else None
-        driver = DRIVER.get(num, "")
+        driver = (drivers or {}).get(num) or DRIVER.get(num, "")
         rt = rt_by_num.get(num)
 
-        if rt is None:  # no GPS (e.g. 1163) -> file only
+        if rt is None:  # ไม่มี GPS ใน DTC (เช่น 1163, รถ GPS เจ้าที่ 2) -> ใช้ไฟล์ล้วน
+            if not route:   # ไม่มีทั้ง GPS และงานในไฟล์ (เช่น รถใหม่รอเชื่อม GPS เจ้าที่ 2)
+                trucks.append(dict(number=num, driver=driver, group=group, category="working",
+                                   gps_status="รอเชื่อม GPS", province=None, district=None,
+                                   location_text="—", destination=None,
+                                   reason="รอเชื่อมข้อมูล GPS (เจ้าที่ 2) / ยังไม่มีงานในไฟล์",
+                                   lat=None, lon=None, speed=None, heading=None, updated=None,
+                                   from_file=True, stale=True))
+                continue
             cat = "find_outbound" if has_return else "find_return"
             reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
                       else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
@@ -533,17 +580,20 @@ def main():
     today = thai_today(now)
     recent_dates = {today, thai_today(now - timedelta(days=1))}  # today + yesterday
     vehicles, realtime = pull_dtc(token)
-    fuel = parse_fuel(download_fuel(sa_json))
+    svc = drive_service(sa_json)
+    fuel = parse_fuel(download_fuel(svc))
     pois = fetch_pois(token)
+    roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
     unknown = set()
-    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois)
+    trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois, roster, drivers)
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
     n_eta = sum(1 for t in trucks if t.get("eta_hours"))
     n_st = sum(1 for t in trucks if t.get("at_station"))
+    src = f"master-file({len(roster)})" if roster else "code-fallback"
     print(f"today={today} recent={sorted(recent_dates)} vehicles={len(vehicles)} "
-          f"realtime={len(realtime)} trucks={len(trucks)} pois={len(pois)} "
+          f"realtime={len(realtime)} trucks={len(trucks)} roster={src} pois={len(pois)} "
           f"at_station={n_st} eta={n_eta} summary={doc['summary']}")
     if unknown:
         print("UNKNOWN destinations (fell back to zone logic):", ", ".join(sorted(unknown)))
