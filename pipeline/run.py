@@ -438,6 +438,15 @@ def fetch_master(svc):
         return None, None
 
 
+_THAI_RE = re.compile(r"[ก-๙]")
+
+
+def _looks_like_route(s):
+    """เส้นทางจริง = มีอักษรไทย และ (มี '-' คั่นจุด หรือขึ้นต้น 'ทอย')
+    — กันโน้ตอื่นในช่อง B เช่น 'บรรณ ขึ้นจ่าย 532' หรือ '400+185-(185)=400'"""
+    return bool(_THAI_RE.search(s)) and ("-" in s or s.strip().startswith("ทอย"))
+
+
 def parse_fuel(xlsx_buf):
     wb = openpyxl.load_workbook(xlsx_buf, data_only=True)
     out = {}
@@ -447,7 +456,7 @@ def parse_fuel(xlsx_buf):
         ridx = None
         for i in range(len(rows) - 1, -1, -1):
             b = rows[i][1]
-            if isinstance(b, str) and b.strip():
+            if isinstance(b, str) and b.strip() and _looks_like_route(b):
                 route, ridx = b.rstrip(), i
                 break
         if ridx is not None:
