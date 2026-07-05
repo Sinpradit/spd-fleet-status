@@ -128,6 +128,63 @@ def summarize(seg, ongoing, blat, blon, window_start=None):
     }
 
 
+MIN_REFUEL_JUMP = 10     # น้ำมันเพิ่ม >= นี้ = เติมน้ำมัน
+MAX_CYCLES_KEEP = 3      # เก็บกี่รอบถังล่าสุด
+CYCLE_SERIES_PTS = 60
+
+
+def fuel_cycles(pts):
+    """รอบถังน้ำมัน: ตัดช่วง 'เติม -> ก่อนเติมรอบถัดไป' จากสตรีมทั้งหน้าต่าง
+    คืน list รอบ (ใหม่สุดก่อน) หรือ None ถ้าเซนเซอร์เด้งเกินเชื่อถือ"""
+    sm = _smooth_fuel(pts)
+    refuel_idx = [i for i in range(1, len(sm))
+                  if sm[i] is not None and sm[i - 1] is not None
+                  and sm[i] - sm[i - 1] >= MIN_REFUEL_JUMP]
+    if len(refuel_idx) > 12:
+        return None                       # สัญญาณเด้งผิดปกติ
+    if not any(v is not None for v in sm):
+        return []
+    bounds = [0] + refuel_idx + [len(pts)]
+    cycles = []
+    for bi in range(len(bounds) - 1):
+        s, e = bounds[bi], bounds[bi + 1]
+        seg = pts[s:e]
+        segsm = sm[s:e]
+        fu = [(i, v) for i, v in enumerate(segsm) if v is not None]
+        if len(seg) < 5 or len(fu) < 2:
+            continue
+        km = 0.0
+        for i in range(s + 1, e):
+            km += _haversine_m(pts[i - 1][1], pts[i - 1][2],
+                               pts[i][1], pts[i][2]) / 1000
+        f0, f1 = fu[0][1], fu[-1][1]
+        drop = f0 - f1
+        series = []
+        cum = 0.0
+        for i in range(len(seg)):
+            if i:
+                cum += _haversine_m(seg[i - 1][1], seg[i - 1][2],
+                                    seg[i][1], seg[i][2]) / 1000
+            series.append([seg[i][0].strftime("%d/%m %H:%M"),
+                           segsm[i], round(cum, 1)])
+        if len(series) > CYCLE_SERIES_PTS:
+            step = len(series) / CYCLE_SERIES_PTS
+            series = [series[int(i * step)]
+                      for i in range(CYCLE_SERIES_PTS)] + [series[-1]]
+        cycles.append({
+            "refueled_at": seg[0][0].strftime("%Y-%m-%d %H:%M"),
+            "starts_at_refuel": bi > 0,     # รอบแรกอาจเริ่มกลางถัง (ขอบหน้าต่าง)
+            "until": seg[-1][0].strftime("%Y-%m-%d %H:%M"),
+            "open": bi == len(bounds) - 2,  # รอบล่าสุด ยังไม่เติมรอบใหม่
+            "fuel_start": f0,
+            "fuel_end": f1,
+            "km": round(km),
+            "km_per_pct": round(km / drop, 1) if drop >= 5 and km > 10 else None,
+            "series": series,
+        })
+    return cycles[-MAX_CYCLES_KEEP:][::-1]
+
+
 def gps2_streams():
     """สตรีมของรถ GPS เจ้าที่ 2 จาก gps2-history.jsonl -> {num: [(dt,lat,lon,fuel)]}"""
     out = {}
@@ -161,6 +218,7 @@ def main():
     ws = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")   # ขอบหน้าต่างสแกน
 
     result = {}
+    cycles = {}
     for num, gid in sorted(gid_by_num.items()):
         if num in EXCLUDE:
             continue
@@ -174,25 +232,35 @@ def main():
                 trips.append(s)
         if trips:
             result[num] = trips[-MAX_TRIPS_KEEP:][::-1]   # ใหม่สุดก่อน
+        cy = fuel_cycles(pts)
+        if cy:
+            cycles[num] = cy
 
     # รถ GPS เจ้าที่ 2 (จากประวัติสะสมของเรา)
     for num, pts in gps2_streams().items():
-        if num in result or num in EXCLUDE or len(pts) < 5:
+        if num in EXCLUDE or len(pts) < 5:
             continue
-        trips = []
-        for seg, ongoing in segment_trips(pts, blat, blon, brad):
-            s = summarize(seg, ongoing, blat, blon)
-            if s:
-                trips.append(s)
-        if trips:
-            result[num] = trips[-MAX_TRIPS_KEEP:][::-1]
+        if num not in result:
+            trips = []
+            for seg, ongoing in segment_trips(pts, blat, blon, brad):
+                s = summarize(seg, ongoing, blat, blon)
+                if s:
+                    trips.append(s)
+            if trips:
+                result[num] = trips[-MAX_TRIPS_KEEP:][::-1]
+        if num not in cycles:
+            cy = fuel_cycles(pts)
+            if cy:
+                cycles[num] = cy
 
     doc = {"generated_at": now.isoformat(), "days_back": DAYS_BACK,
-           "trips": result}
+           "trips": result, "fuel_cycles": cycles}
     with open("trips.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
     ntr = sum(len(v) for v in result.values())
-    print(f"trips.json: {len(result)} trucks, {ntr} trips")
+    ncy = sum(len(v) for v in cycles.values())
+    print(f"trips.json: {len(result)} trucks, {ntr} trips, "
+          f"{len(cycles)} trucks with fuel cycles ({ncy} cycles)")
 
 
 if __name__ == "__main__":
