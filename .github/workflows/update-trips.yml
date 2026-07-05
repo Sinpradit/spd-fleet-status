@@ -1,0 +1,47 @@
+name: update-trips
+
+on:
+  schedule:
+    - cron: "23 */3 * * *"   # ทุก 3 ชม. นาทีหลีก peak
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-trips
+  cancel-in-progress: false
+
+jobs:
+  trips:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install --quiet openpyxl google-api-python-client google-auth
+
+      - name: Extract trips
+        env:
+          DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
+        run: PYTHONPATH=pipeline python pipeline/trips.py
+
+      - name: Commit trips.json if changed
+        run: |
+          git config user.name "fleet-bot"
+          git config user.email "actions@github.com"
+          if git status --porcelain | grep -q "trips.json"; then
+            git add trips.json
+            git commit -m "Update trips [skip ci] $(date -u +%FT%TZ)"
+            for i in 1 2 3; do
+              git push && { echo "pushed"; exit 0; }
+              git pull --rebase -X theirs origin main
+            done
+            git push && echo "pushed (final)" || exit 1
+          else
+            echo "no change"
+          fi
