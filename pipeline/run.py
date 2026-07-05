@@ -173,6 +173,15 @@ DEST_POI = {
 HOME_POI = "สินประดิษฐ์"          # ฐานบ้าน — ใช้คิด ETA ขากลับ
 TRUCK_FACTOR = 1.2                 # รถบรรทุกช้ากว่าเวลารถเก๋งของ OSRM
 
+# ---- เฟส 4: ตรวจนอกเส้นทาง (ขาไปเท่านั้น กันเตือนมั่ว) ----
+OFFROUTE_KM = 25                   # ห่างเส้นถนนมาตรฐานเกินนี้ = เบี่ยง
+# จังหวัดที่อยู่เฉพาะสายใดสายหนึ่ง (โซนบ้าน/บุรีรัมย์/โคราชใช้ร่วมได้ ไม่อยู่ในนี้)
+LINE_CENTRAL_ONLY = {"สระบุรี", "ลพบุรี", "พระนครศรีอยุธยา", "ปทุมธานี",
+                     "นนทบุรี", "กรุงเทพมหานคร", "สมุทรปราการ", "นครปฐม",
+                     "สมุทรสาคร", "สุพรรณบุรี", "กาญจนบุรี"}
+LINE_EAST_ONLY = {"สระแก้ว", "ปราจีนบุรี", "นครนายก", "ฉะเชิงเทรา",
+                  "ชลบุรี", "ระยอง", "จันทบุรี", "ตราด"}
+
 
 def _norm(s):
     return re.sub(r"\s+", "", s or "")
@@ -294,6 +303,63 @@ def osrm_eta_hours(lat1, lon1, lat2, lon2):
     except Exception:
         _osrm_fail += 1
         return None
+
+
+_route_geom_cache = {}
+
+
+def osrm_route_geometry(lat1, lon1, lat2, lon2, cache_key=None):
+    """เส้นถนนมาตรฐาน (พิกัดเรียงตามเส้น) จาก OSRM; None ถ้าดึงไม่ได้"""
+    global _osrm_fail
+    if cache_key and cache_key in _route_geom_cache:
+        return _route_geom_cache[cache_key]
+    if _osrm_fail >= 2:
+        return None
+    url = (f"https://router.project-osrm.org/route/v1/driving/"
+           f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "spd-fleetview"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        coords = d["routes"][0]["geometry"]["coordinates"]   # [[lon,lat],...]
+        pts = [(c[1], c[0]) for c in coords[::5]] or [(lat2, lon2)]
+        if cache_key:
+            _route_geom_cache[cache_key] = pts
+        return pts
+    except Exception:
+        _osrm_fail += 1
+        return None
+
+
+_LINE_SHARED = HOME | {"บุรีรัมย์", "นครราชสีมา", "ร้อยเอ็ด", "ยโสธร", "อำนาจเจริญ"}
+
+
+def off_route_check(tlat, tlon, prov, dest_prov, home, dest_poi):
+    """คืนข้อความเตือนถ้าเบี่ยงเส้นทาง (เฉพาะขาไป) — None ถ้าปกติ/ตรวจไม่ได้
+    กติกา: รถบริษัทวิ่ง 2 สาย (กลาง/ตะวันออก) — ทั้งสองสายถือว่า "ปกติ" เสมอ
+    1) ผิดสายชัดเจน: ปลายทางสายหนึ่ง แต่รถอยู่จังหวัดของอีกสายล้วน → เตือน
+    2) รถอยู่จังหวัดนอกทั้งสองสาย (เช่น ขอนแก่น) → เช็คระยะจากเส้น OSRM"""
+    if not prov:
+        return None
+    if dest_prov in LINE_CENTRAL_ONLY and prov in LINE_EAST_ONLY:
+        return "⚠️ นอกเส้นทาง (อยู่สายตะวันออก แต่ปลายทางสายกลาง)"
+    if dest_prov in LINE_EAST_ONLY and prov in LINE_CENTRAL_ONLY:
+        return "⚠️ นอกเส้นทาง (อยู่สายกลาง แต่ปลายทางสายตะวันออก)"
+    # อยู่บนสายที่รู้จัก (สายไหนก็ได้) = ปกติ — ไม่ใช้ OSRM ตัดสิน (กันเตือนมั่ว)
+    if prov in LINE_CENTRAL_ONLY or prov in LINE_EAST_ONLY or prov in _LINE_SHARED:
+        return None
+    # จังหวัดแปลกนอกทั้งสองสาย → วัดระยะจากเส้นถนนมาตรฐาน
+    if not (dest_poi and dest_poi.get("lat") and home and home.get("lat")):
+        return f"⚠️ อยู่นอกเส้นทางปกติ ({prov})"
+    line = osrm_route_geometry(home["lat"], home["lon"],
+                               dest_poi["lat"], dest_poi["lon"],
+                               cache_key=_norm(dest_poi["name"]))
+    if not line:
+        return f"⚠️ อยู่นอกเส้นทางปกติ ({prov})"
+    dmin = min(_haversine_m(tlat, tlon, la, lo) for la, lo in line) / 1000
+    if dmin > OFFROUTE_KM:
+        return f"⚠️ นอกเส้นทาง ({prov} — ห่างเส้นปกติ ~{round(dmin)} กม.)"
+    return None
 
 
 def fmt_eta(h):
@@ -710,6 +776,25 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     e = fmt_eta(eta_h)
                     if e:
                         reason += f" · อีก {e} ถึงบ้าน"
+        # อยู่ในสถานีที่ตรงกับ "จุดกลาง" ของเส้นทาง = จุดรับของขากลับ → แสดงตามจริง
+        if cat == "working" and at_st and has_return and len(wps) > 2:
+            sn = _norm(at_st)
+            for w in wps[2:-1]:
+                wn = _norm(w)
+                if len(wn) >= 3 and (wn in sn or sn in wn):
+                    reason = f"อยู่ที่ {at_st} — รับของขากลับ"
+                    break
+
+        # --- เฟส 4: ตรวจนอกเส้นทาง (เฉพาะช่วงกำลังวิ่งไปส่ง และไม่ได้อยู่ในสถานีบริษัท) ---
+        off = None
+        if (cat == "working" and tlat and tlon and not is_toy and not at_st
+                and "กำลังไปส่ง" in reason):
+            dest_prov = resolve_province(out_name) if out_name else None
+            off = off_route_check(tlat, tlon, prov, dest_prov,
+                                  pois.get(_norm(HOME_POI)), dest_poi)
+            if off:
+                reason += " · " + off
+
         # รถจอดอยู่ในสถานีอื่นที่รู้จัก (ไม่ใช่ปลายทาง) → บอกไว้
         if at_st and at_st not in reason:
             reason += f" · 📍{at_st}"
@@ -727,7 +812,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                            heading=heading, updated=rt.get("time"), from_file=False,
                            stale=bool(rt.get("_stale")),
                            at_station=at_st, eta_hours=(round(eta_h, 1) if eta_h else None),
-                           fuel=rt.get("_fuel")))
+                           fuel=rt.get("_fuel"), off_route=bool(off)))
     return trucks
 
 
