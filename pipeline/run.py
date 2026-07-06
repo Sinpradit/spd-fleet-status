@@ -29,8 +29,8 @@ MASTER_FILE_ID = "1PoZlg99nOb6zuGJto95ibMyv-4_9f3CGNlHUqBZexIM"
 GPS2_FILE_ID = "1IXj3cR32oGcecXvledIlFV0O5lKvX-fV"
 # แผนที่ VIN -> เลขรถ (เติมเมื่อ vendor ยืนยัน / เปลี่ยน label เป็นทะเบียนแล้วไม่ต้องใช้)
 GPS2_VIN_MAP = {
-    # "MP1GXZ77NRT001113": "4100",
-    # "MP1GXZ77NRT001115": "4102",
+    "MP1GXZ77NRT001113": "4100",
+    "MP1GXZ77NRT001115": "4102",
 }
 COUNT = 3
 
