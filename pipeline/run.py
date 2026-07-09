@@ -795,13 +795,16 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 e = fmt_eta(eta_h)
                 if e:
                     reason += f" · อีก {e} ถึง {dest_poi['name']}"
-            elif prov not in HOME:
+            else:
+                # ETA กลับฐาน — ทุกคันที่ยังไม่ถึงฐานจริง (ห่างเกิน 5 กม.)
                 home = pois.get(_norm(HOME_POI))
                 if home and home.get("lat"):
-                    eta_h = osrm_eta_hours(tlat, tlon, home["lat"], home["lon"])
-                    e = fmt_eta(eta_h)
-                    if e:
-                        reason += f" · อีก {e} ถึงบ้าน"
+                    d_m = _haversine_m(tlat, tlon, home["lat"], home["lon"])
+                    if d_m > 5000:
+                        eta_h = osrm_eta_hours(tlat, tlon, home["lat"], home["lon"])
+                        e = fmt_eta(eta_h)
+                        if e:
+                            reason += f" · อีก {e} ถึงบ้าน"
         # อยู่ในสถานีที่ตรงกับ "จุดกลาง" ของเส้นทาง = จุดรับของขากลับ → แสดงตามจริง
         if cat == "working" and at_st and has_return and len(wps) > 2:
             sn = _norm(at_st)
