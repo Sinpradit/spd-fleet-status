@@ -62,8 +62,9 @@ GROUPS = {
 GROUP_OF = {n: g for g, ns in GROUPS.items() for n in ns}
 GROUP_LABEL = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ", "other": "ไม่ระบุกลุ่ม"}
 GROUP_ORDER = ["dump", "pen", "flatbed", "other"]
-CAT_ORDER = ["find_outbound", "find_return", "working"]
-CAT_LABEL = {"find_outbound": "หางานไป", "find_return": "หางานกลับ", "working": "อยู่ระหว่างทำงาน"}
+CAT_ORDER = ["find_outbound", "find_return", "working", "parked"]
+CAT_LABEL = {"find_outbound": "หางานไป", "find_return": "หางานกลับ",
+             "working": "อยู่ระหว่างทำงาน", "parked": "รถจอด"}
 EXCLUDE = {"2168", "1288", "1250"}
 
 DRIVER = {
@@ -665,8 +666,31 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # outbound destination = 2nd waypoint (จุดที่ 2); fall back to 1st/last
         out_name = wps[1] if len(wps) >= 2 else (wps[-1] if wps else None)
         idx_out = PROV_IDX.get(resolve_province(out_name)) if out_name else None
-        driver = (drivers or {}).get(num) or DRIVER.get(num, "")
+        # ไฟล์ทะเบียนคือความจริง: ช่องคนขับว่าง = ไม่มีคนขับ (ไม่ fallback รายคัน)
+        driver = (drivers.get(num, "") if drivers is not None
+                  else DRIVER.get(num, ""))
         rt = rt_by_num.get(num)
+
+        if not driver:                      # ไม่มีคนขับ = รถจอด
+            prov = dist = at_p = None
+            la = lo = spd = fu = upd = None
+            if rt is not None:
+                prov, dist = rt.get("province_th"), rt.get("district_th")
+                la, lo = rt.get("lat"), rt.get("lon")
+                spd, upd, fu = rt.get("gps_speed"), rt.get("time"), rt.get("_fuel")
+                try:
+                    at_p = station_of(float(la or 0), float(lo or 0), pois) if la else None
+                except (TypeError, ValueError):
+                    at_p = None
+            reason = "ไม่มีคนขับ — รถจอด" + (f" · 📍{at_p}" if at_p else "")
+            loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
+            trucks.append(dict(number=num, driver="", group=group, category="parked",
+                               gps_status="รถจอด", province=prov, district=dist,
+                               location_text=loc, destination=None, reason=reason,
+                               lat=la, lon=lo, speed=spd, heading=None, updated=upd,
+                               from_file=rt is None, stale=False, at_station=at_p,
+                               eta_hours=None, fuel=fu, off_route=False))
+            continue
 
         if rt is None:  # ไม่มี GPS ใน DTC (เช่น 1163, รถ GPS เจ้าที่ 2) -> ใช้ไฟล์ล้วน
             if not route:   # ไม่มีทั้ง GPS และงานในไฟล์ (เช่น รถใหม่รอเชื่อม GPS เจ้าที่ 2)
@@ -833,7 +857,8 @@ def build_doc(trucks, now):
         "schema_version": 1,
         "generated_at": now.isoformat(),
         "summary": {"need_work": need, "find_outbound": counts["find_outbound"],
-                    "find_return": counts["find_return"], "working": counts["working"]},
+                    "find_return": counts["find_return"], "working": counts["working"],
+                    "parked": counts.get("parked", 0)},
         "categories": cats,
     }
 
