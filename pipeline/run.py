@@ -652,8 +652,10 @@ def route_waypoints(route):
 
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
-             roster=None, drivers=None, gps2=None):
+             roster=None, drivers=None, gps2=None, prev_pos=None):
     pois = pois or {}
+    prev_pos = prev_pos or {}
+    home_st = pois.get(_norm(HOME_POI))
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
     for r in realtime:
@@ -729,6 +731,21 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             heading = None
         head_out = heading is not None and 200 <= heading <= 340
         is_recent = fdate in recent_dates       # today or yesterday
+        # ทิศจากการเคลื่อนที่จริง (เทียบตำแหน่งรอบก่อน ~30 นาที) — แม่นกว่าเข็มทิศชั่วขณะ
+        mv = None
+        try:
+            _tla = float(rt.get("lat") or 0) if rt else 0
+            _tlo = float(rt.get("lon") or 0) if rt else 0
+            if home_st and home_st.get("lat") and _tla and prev_pos.get(num):
+                d_now = _haversine_m(_tla, _tlo, home_st["lat"], home_st["lon"])
+                pla, plo = prev_pos[num]
+                d_prev = _haversine_m(pla, plo, home_st["lat"], home_st["lon"])
+                if d_now - d_prev > 1500:
+                    mv = "out"       # ห่างฐานมากขึ้น = กำลังวิ่งออก
+                elif d_prev - d_now > 1500:
+                    mv = "home"      # เข้าใกล้ฐาน = กำลังกลับ
+        except (TypeError, ValueError):
+            mv = None
         # --- station awareness (DTC POI) ---
         try:
             tlat, tlon = float(rt.get("lat") or 0), float(rt.get("lon") or 0)
@@ -784,13 +801,16 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             else:                                 # มีงานกลับครบเที่ยว
                 if at_dest:
                     cat, reason = "working", f"อยู่ที่ {at_st} — ส่งของ (มีงานกลับต่อ)"
-                elif idx_now <= 1:                # ถึงโซนบ้าน
-                    if is_recent and head_out:
-                        cat, reason = "working", "เพิ่งออกงานวันนี้ (มุ่งออก)"
+                elif idx_now <= 1:                # โซนบ้าน
+                    if is_recent and (mv == "out" or head_out):
+                        cat, reason = "working", f"เพิ่งออกงาน กำลังไปส่ง ({out_name})"
                     else:
                         cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
-                elif head_out and idx_now < idx_out:
+                elif mv == "out" or (head_out and idx_now < (idx_out or 99)):
                     cat, reason = "working", f"กำลังไปส่ง ({out_name})"
+                elif mv == "home":
+                    near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
+                    cat, reason = "working", "กำลังขนกลับ" + near
                 else:
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
@@ -806,12 +826,26 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     h = (_haversine_m(tlat, tlon, dlat, dlon) / 1000) * 1.3 / 60
                 return h
 
-            if (cat == "working" and "กำลังไปส่ง" in reason
-                    and dest_poi and dest_poi.get("lat") and not at_dest):
-                eta_h = _eta_to(dest_poi["lat"], dest_poi["lon"])
+            # ช่วงขาไป (รับงานแล้ว/กำลังจะออก/กำลังไปส่ง) → ETA ชี้ปลายทางเสมอ
+            outbound_phase = (cat == "working" and not at_dest and
+                              ("กำลังไปส่ง" in reason or "กำลังจะออก" in reason
+                               or "เพิ่งออกงาน" in reason))
+            dest_tgt = None
+            dest_label = None
+            if outbound_phase:
+                if dest_poi and dest_poi.get("lat"):
+                    dest_tgt = (dest_poi["lat"], dest_poi["lon"])
+                    dest_label = dest_poi["name"]
+                else:                      # ไม่มีสถานี → ใช้จุดกลางจังหวัดปลายทาง
+                    dp = resolve_province(out_name) if out_name else None
+                    if dp in PROV_CENTROIDS:
+                        dest_tgt = PROV_CENTROIDS[dp]
+                        dest_label = dp
+            if dest_tgt:
+                eta_h = _eta_to(dest_tgt[0], dest_tgt[1])
                 e = fmt_eta(eta_h)
                 if e:
-                    reason += f" · อีก {e} ถึง {dest_poi['name']}"
+                    reason += f" · อีก {e} ถึง {dest_label}"
             else:
                 # ETA กลับฐาน — ทุกคันใน 3 หมวด ไม่ว่าอยู่ที่ไหน
                 home = pois.get(_norm(HOME_POI))
@@ -900,9 +934,21 @@ def main():
     pois = fetch_pois(token)
     roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
     gps2 = fetch_gps2(svc, now)              # รถ GPS เจ้าที่ 2 (webhook -> Drive)
+    # ตำแหน่งรอบก่อน (จากไฟล์เดิมใน repo) — ใช้ดูทิศการเคลื่อนที่จริง
+    prev_pos = {}
+    try:
+        with open("fleet-status.json", encoding="utf-8") as f:
+            pd = json.load(f)
+        for c in pd.get("categories", []):
+            for g in c.get("groups", []):
+                for t in g.get("trucks", []):
+                    if t.get("lat") and t.get("lon"):
+                        prev_pos[t["number"]] = (t["lat"], t["lon"])
+    except Exception:
+        pass
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
-                      roster, drivers, gps2)
+                      roster, drivers, gps2, prev_pos)
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:
