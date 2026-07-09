@@ -785,15 +785,17 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
 
-        # --- ETA ต่อท้ายเหตุผล (เฉพาะรถที่กำลังวิ่งงาน) ---
+        # --- ETA ต่อท้ายเหตุผล (ทุกคันใน 3 หมวดที่มีพิกัด) ---
+        # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่นที่อยู่นอกโซนบ้าน = ETA กลับถึงบ้าน
         eta_h = None
-        if cat == "working" and tlat and tlon and not is_toy:
-            if "กำลังไปส่ง" in reason and dest_poi and dest_poi.get("lat") and not at_dest:
+        if tlat and tlon and not is_toy:
+            if (cat == "working" and "กำลังไปส่ง" in reason
+                    and dest_poi and dest_poi.get("lat") and not at_dest):
                 eta_h = osrm_eta_hours(tlat, tlon, dest_poi["lat"], dest_poi["lon"])
                 e = fmt_eta(eta_h)
                 if e:
                     reason += f" · อีก {e} ถึง {dest_poi['name']}"
-            elif "ขนกลับ" in reason:
+            elif prov not in HOME:
                 home = pois.get(_norm(HOME_POI))
                 if home and home.get("lat"):
                     eta_h = osrm_eta_hours(tlat, tlon, home["lat"], home["lon"])
