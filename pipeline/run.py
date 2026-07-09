@@ -381,11 +381,21 @@ def thai_today(now):
     return f"{now.day} {THAI_MONTH[now.month]} {(now.year + 543) % 100:02d}"
 
 
-def dtc_post(path, body):
-    req = urllib.request.Request(DTC_BASE + path, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=40, context=_ctx) as r:
-        return json.loads(r.read().decode("utf-8"))
+def dtc_post(path, body, retries=2):
+    last = None
+    for i in range(retries + 1):
+        try:
+            req = urllib.request.Request(
+                DTC_BASE + path, data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=40, context=_ctx) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:              # DTC หลุดเป็นพัก ๆ — ลองซ้ำก่อนยอมแพ้
+            last = e
+            if i < retries:
+                import time
+                time.sleep(3 * (i + 1))
+    raise last
 
 
 def pull_dtc(token):
@@ -785,23 +795,32 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
 
-        # --- ETA ต่อท้ายเหตุผล (ทุกคันใน 3 หมวดที่มีพิกัด) ---
-        # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่นที่อยู่นอกโซนบ้าน = ETA กลับถึงบ้าน
+        # --- ETA ต่อท้ายเหตุผล (ทุกคันใน 3 หมวดที่มีพิกัด รวมงานทอย) ---
+        # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่น = ETA กลับถึงฐาน
         eta_h = None
-        if tlat and tlon and not is_toy:
+        if tlat and tlon:
+            def _eta_to(dlat, dlon):
+                """OSRM ก่อน; ล่มก็ประมาณจากระยะทางตรง (คูณแฟกเตอร์ถนน 1.3, 60 กม./ชม.)"""
+                h = osrm_eta_hours(tlat, tlon, dlat, dlon)
+                if h is None:
+                    h = (_haversine_m(tlat, tlon, dlat, dlon) / 1000) * 1.3 / 60
+                return h
+
             if (cat == "working" and "กำลังไปส่ง" in reason
                     and dest_poi and dest_poi.get("lat") and not at_dest):
-                eta_h = osrm_eta_hours(tlat, tlon, dest_poi["lat"], dest_poi["lon"])
+                eta_h = _eta_to(dest_poi["lat"], dest_poi["lon"])
                 e = fmt_eta(eta_h)
                 if e:
                     reason += f" · อีก {e} ถึง {dest_poi['name']}"
             else:
-                # ETA กลับฐาน — ทุกคันที่ยังไม่ถึงฐานจริง (ห่างเกิน 5 กม.)
+                # ETA กลับฐาน — ทุกคันใน 3 หมวด ไม่ว่าอยู่ที่ไหน
                 home = pois.get(_norm(HOME_POI))
                 if home and home.get("lat"):
-                    d_m = _haversine_m(tlat, tlon, home["lat"], home["lon"])
-                    if d_m > 5000:
-                        eta_h = osrm_eta_hours(tlat, tlon, home["lat"], home["lon"])
+                    if _haversine_m(tlat, tlon, home["lat"], home["lon"]) <= 1000:
+                        eta_h = 0.0            # อยู่ที่ฐานแล้ว
+                        reason += " · ถึงฐานแล้ว"
+                    else:
+                        eta_h = _eta_to(home["lat"], home["lon"])
                         e = fmt_eta(eta_h)
                         if e:
                             reason += f" · อีก {e} ถึงบ้าน"
@@ -840,7 +859,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
                            heading=heading, updated=rt.get("time"), from_file=False,
                            stale=bool(rt.get("_stale")),
-                           at_station=at_st, eta_hours=(round(eta_h, 1) if eta_h else None),
+                           at_station=at_st,
+                           eta_hours=(round(eta_h, 1) if eta_h is not None else None),
                            fuel=rt.get("_fuel"), off_route=bool(off)))
     return trucks
 
