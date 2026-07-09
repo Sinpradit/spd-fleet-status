@@ -686,7 +686,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
             trucks.append(dict(number=num, driver="", group=group, category="parked",
                                gps_status="รถจอด", province=prov, district=dist,
-                               location_text=loc, destination=None, reason=reason,
+                               location_text=loc, destination=disp_dest, reason=reason,
                                lat=la, lon=lo, speed=spd, heading=None, updated=upd,
                                from_file=rt is None, stale=False, at_station=at_p,
                                eta_hours=None, fuel=fu, off_route=False))
