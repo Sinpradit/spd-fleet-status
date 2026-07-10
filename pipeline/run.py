@@ -846,6 +846,35 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 e = fmt_eta(eta_h)
                 if e:
                     reason += f" · อีก {e} ถึง {dest_label}"
+            elif cat == "find_return":
+                eta_h = 0.0        # ถึงปลายทางแล้ว จอดรอรับงานกลับ — ไม่คำนวณ ETA กลับบ้านให้สับสน
+            elif cat == "working" and has_return and wps:
+                # ขากลับ → ETA ถึง "ปลายทางสุดท้ายที่เขียนในไฟล์น้ำมัน" (ไม่ใช่บ้านลอย ๆ)
+                fname = wps[-1]
+                fpoi = match_dest_poi(fname, pois)
+                ftgt = flabel = None
+                if fpoi and fpoi.get("lat"):
+                    ftgt, flabel = (fpoi["lat"], fpoi["lon"]), fpoi["name"]
+                else:
+                    fp = resolve_province(fname)
+                    if fp in PROV_CENTROIDS:
+                        ftgt, flabel = PROV_CENTROIDS[fp], fname
+                if ftgt:
+                    if _haversine_m(tlat, tlon, ftgt[0], ftgt[1]) <= 1500:
+                        eta_h = 0.0
+                        reason += " · ถึงปลายทางแล้ว"
+                    else:
+                        eta_h = _eta_to(ftgt[0], ftgt[1])
+                        e = fmt_eta(eta_h)
+                        if e:
+                            reason += f" · อีก {e} ถึง {flabel}"
+                else:
+                    home = pois.get(_norm(HOME_POI))
+                    if home and home.get("lat"):
+                        eta_h = _eta_to(home["lat"], home["lon"])
+                        e = fmt_eta(eta_h)
+                        if e:
+                            reason += f" · อีก {e} ถึงบ้าน"
             else:
                 # ETA กลับฐาน — ทุกคันใน 3 หมวด ไม่ว่าอยู่ที่ไหน
                 home = pois.get(_norm(HOME_POI))
