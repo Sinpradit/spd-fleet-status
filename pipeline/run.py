@@ -806,7 +806,10 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                         cat, reason = "working", f"เพิ่งออกงาน กำลังไปส่ง ({out_name})"
                     else:
                         cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
-                elif mv == "out" or (head_out and idx_now < (idx_out or 99)):
+                elif is_recent and (mv == "out"
+                                    or (head_out and idx_now < (idx_out or 99))):
+                    # งานใหม่ (วันนี้/เมื่อวาน) เท่านั้นที่ยังอยู่ช่วงขาออกได้
+                    # — กันรถขนกลับงานเก่าที่วิ่งอ้อมแล้วห่างฐานชั่วคราวโดนตีเป็นไปส่ง
                     cat, reason = "working", f"กำลังไปส่ง ({out_name})"
                 elif mv == "home":
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
