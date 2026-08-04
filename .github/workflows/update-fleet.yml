@@ -19,16 +19,33 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      # Enforce the 23:00-05:00 Thai quiet window for EVERY trigger, including
+      # Apps Script workflow_dispatch (which runs promptly and ignores the cron window).
+      - name: Time gate (skip 23:00-05:00 Thai)
+        id: gate
+        run: |
+          H=$(TZ=Asia/Bangkok date +%H)
+          echo "Thai hour = $H"
+          if [ "$H" -ge 23 ] || [ "$H" -lt 5 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "quiet window (Thai ${H}:xx) - skipping."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
         with:
           python-version: "3.11"
 
       - name: Install deps
+        if: steps.gate.outputs.run == 'true'
         run: pip install --quiet openpyxl google-api-python-client google-auth
 
       - name: Run pipeline (retry transient upstream failures)
+        if: steps.gate.outputs.run == 'true'
         env:
           DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
@@ -49,6 +66,7 @@ jobs:
           echo "pipeline failed after 4 attempts (upstream likely down)"; exit 1
 
       - name: Commit data files if changed
+        if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "fleet-bot"
           git config user.email "actions@github.com"
