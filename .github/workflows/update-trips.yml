@@ -25,10 +25,20 @@ jobs:
       - name: Install deps
         run: pip install --quiet openpyxl google-api-python-client google-auth
 
-      - name: Extract trips
+      - name: Extract trips (retry transient upstream failures)
         env:
           DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
-        run: PYTHONPATH=pipeline python pipeline/trips.py
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::trips attempt $attempt"
+            if PYTHONPATH=pipeline python pipeline/trips.py; then
+              echo "::endgroup::"; echo "trips ok (attempt $attempt)"; exit 0
+            fi
+            echo "::endgroup::"
+            echo "attempt $attempt failed"
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 30))
+          done
+          echo "trips failed after 3 attempts"; exit 1
 
       - name: Commit trips.json if changed
         run: |

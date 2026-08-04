@@ -381,7 +381,7 @@ def thai_today(now):
     return f"{now.day} {THAI_MONTH[now.month]} {(now.year + 543) % 100:02d}"
 
 
-def dtc_post(path, body, retries=2):
+def dtc_post(path, body, retries=3):
     last = None
     for i in range(retries + 1):
         try:
@@ -390,11 +390,11 @@ def dtc_post(path, body, retries=2):
                 headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=40, context=_ctx) as r:
                 return json.loads(r.read().decode("utf-8"))
-        except Exception as e:              # DTC หลุดเป็นพัก ๆ — ลองซ้ำก่อนยอมแพ้
+        except Exception as e:              # DTC หลุดเป็นพัก ๆ (TLS reset) — ลองซ้ำก่อนยอมแพ้
             last = e
             if i < retries:
                 import time
-                time.sleep(3 * (i + 1))
+                time.sleep(4 * (i + 1))     # 4,8,12s ≈ 24s window ต่อ 1 รอบ run
     raise last
 
 

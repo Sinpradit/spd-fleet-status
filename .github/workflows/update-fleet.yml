@@ -2,7 +2,7 @@ name: update-fleet-status
 
 on:
   schedule:
-    - cron: "13,43 * * * *"   # every 30 min at off-peak minutes (avoid :00/:30 congestion)
+    - cron: "7,22,37,52 * * * *"   # every 15 min at off-peak minutes (avoid :00/:15/:30 congestion). Public repo = free minutes; more shots survive GitHub's overnight drop-rate.
   workflow_dispatch:
 
 permissions:
@@ -25,11 +25,25 @@ jobs:
       - name: Install deps
         run: pip install --quiet openpyxl google-api-python-client google-auth
 
-      - name: Run pipeline
+      - name: Run pipeline (retry transient upstream failures)
         env:
           DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
-        run: python pipeline/run.py
+        run: |
+          # DTC/OSRM/Drive drop connections in bursts. Retry the whole run a few
+          # times spread over ~3 min so a brief upstream outage doesn't skip an update.
+          # Files are only committed by the next step, which is skipped if this exits 1,
+          # so a failed attempt never commits partial data.
+          for attempt in 1 2 3 4; do
+            echo "::group::pipeline attempt $attempt"
+            if python pipeline/run.py; then
+              echo "::endgroup::"; echo "pipeline ok (attempt $attempt)"; exit 0
+            fi
+            echo "::endgroup::"
+            echo "attempt $attempt failed"
+            [ "$attempt" -lt 4 ] && sleep $((attempt * 30))
+          done
+          echo "pipeline failed after 4 attempts (upstream likely down)"; exit 1
 
       - name: Commit data files if changed
         run: |
