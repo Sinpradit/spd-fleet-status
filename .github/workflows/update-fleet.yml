@@ -2,7 +2,10 @@ name: update-fleet-status
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"   # every 15 min at off-peak minutes (avoid :00/:15/:30 congestion). Public repo = free minutes; more shots survive GitHub's overnight drop-rate.
+    # every 15 min at off-peak minutes, but ONLY during 05:00-23:00 Thai (UTC+7).
+    # Quiet window 23:00-05:00 Thai = 16:00-22:00 UTC (owner: no overnight updates needed) -> run UTC hours 0-15,22,23.
+    # Thailand has no DST, so this mapping is stable year-round. Public repo = free Actions minutes.
+    - cron: "7,22,37,52 0-15,22,23 * * *"
   workflow_dispatch:
 
 permissions:
