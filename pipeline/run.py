@@ -671,8 +671,11 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         group = GROUP_OF.get(num, "other")             # รถใหม่ยังไม่ระบุกลุ่ม -> "ไม่ระบุกลุ่ม"
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
-        # job_key = ลายนิ้วมืองานในไฟล์น้ำมัน (เส้นทาง+วันที่) — โน้ตส่วนตัวในแอปเคลียร์เมื่อค่านี้เปลี่ยน (ลงงานใหม่/แก้ไฟล์)
-        jk = f"{route or ''}|{fdate or ''}"
+        # job_key = ลายนิ้วมืองานในไฟล์น้ำมัน (เส้นทาง+วันที่) — โน้ตส่วนตัวในแอปเคลียร์เมื่อค่านี้เปลี่ยน (ลงงานใหม่).
+        # ไม่มีงาน/เส้นทางว่าง -> None (ไม่ใช่ "|") เพื่อให้แอปแยก "ไม่รู้งาน" ออกจาก "งานเปลี่ยน" กันลบโน้ตพลาด.
+        # strip กัน fingerprint กระพริบจาก whitespace/ฟอร์แมตวันที่.
+        jk = (f"{route.strip()}|{str(fdate).strip() if fdate else ''}"
+              if route and route.strip() else None)
         is_toy = bool(route) and route.strip().startswith("ทอย")
         has_return = bool(route) and not route.rstrip().endswith("-") and not is_toy
         disp_dest = destination_of(route)        # what the app shows
