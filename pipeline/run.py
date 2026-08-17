@@ -671,6 +671,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         group = GROUP_OF.get(num, "other")             # รถใหม่ยังไม่ระบุกลุ่ม -> "ไม่ระบุกลุ่ม"
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
+        # job_key = ลายนิ้วมืองานในไฟล์น้ำมัน (เส้นทาง+วันที่) — โน้ตส่วนตัวในแอปเคลียร์เมื่อค่านี้เปลี่ยน (ลงงานใหม่/แก้ไฟล์)
+        jk = f"{route or ''}|{fdate or ''}"
         is_toy = bool(route) and route.strip().startswith("ทอย")
         has_return = bool(route) and not route.rstrip().endswith("-") and not is_toy
         disp_dest = destination_of(route)        # what the app shows
@@ -701,7 +703,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                                location_text=loc, destination=disp_dest, reason=reason,
                                lat=la, lon=lo, speed=spd, heading=None, updated=upd,
                                from_file=rt is None, stale=False, at_station=at_p,
-                               eta_hours=None, fuel=fu, off_route=False))
+                               eta_hours=None, fuel=fu, off_route=False, job_key=jk))
             continue
 
         if rt is None:  # ไม่มี GPS ใน DTC (เช่น 1163, รถ GPS เจ้าที่ 2) -> ใช้ไฟล์ล้วน
@@ -711,7 +713,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                                    location_text="—", destination=None,
                                    reason="รอเชื่อมข้อมูล GPS (เจ้าที่ 2) / ยังไม่มีงานในไฟล์",
                                    lat=None, lon=None, speed=None, heading=None, updated=None,
-                                   from_file=True, stale=True))
+                                   from_file=True, stale=True, job_key=jk))
                 continue
             cat = "find_outbound" if has_return else "find_return"
             reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
@@ -720,7 +722,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                                gps_status="ไม่มี GPS", province=None, district=None,
                                location_text="—", destination=disp_dest, reason=reason, lat=None,
                                lon=None, speed=None, heading=None, updated=None,
-                               from_file=True, stale=False))
+                               from_file=True, stale=False, job_key=jk))
             continue
 
         prov, dist = rt.get("province_th"), rt.get("district_th")
@@ -929,7 +931,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                            stale=bool(rt.get("_stale")),
                            at_station=at_st,
                            eta_hours=(round(eta_h, 1) if eta_h is not None else None),
-                           fuel=rt.get("_fuel"), off_route=bool(off)))
+                           fuel=rt.get("_fuel"), off_route=bool(off), job_key=jk))
     return trucks
 
 
