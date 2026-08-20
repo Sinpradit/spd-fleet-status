@@ -1000,6 +1000,33 @@ def main():
                                        ensure_ascii=False) + "\n")
     except Exception as e:
         print("WARN: gps2 history append failed ->", repr(e))
+    # เฟส 1 (สถิติเส้นทาง): สะสมจุด GPS ติดป้าย "เส้นทาง" ของรถที่กำลังวิ่งงาน
+    # -> route-track.jsonl : ไว้สร้าง "เส้นปกติต่อคู่" ในเฟส 2 (ตรวจรถไม่ใช้เส้นปกติ).
+    # เก็บเฉพาะ working + เคลื่อนที่ (กันจุดซ้ำตอนจอด). พังก็ไม่ล้มรอบหลัก.
+    try:
+        recs = []
+        for t in trucks:
+            jk = t.get("job_key")
+            if not jk:
+                continue
+            route = jk.split("|", 1)[0].strip()
+            la, lo = t.get("lat"), t.get("lon")
+            if not route or not la or not lo:
+                continue
+            if t.get("category") != "working":
+                continue
+            sp = t.get("speed")
+            if sp is not None and sp <= 0:
+                continue
+            recs.append({"t": t.get("updated"), "n": t.get("number"), "r": route,
+                         "la": round(la, 5), "lo": round(lo, 5), "sp": sp})
+        if recs:
+            with open("route-track.jsonl", "a", encoding="utf-8") as f:
+                for rec in recs:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(f"route-track: +{len(recs)} pts")
+    except Exception as e:
+        print("WARN: route-track append failed ->", repr(e))
     doc = build_doc(trucks, now)
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
