@@ -1015,6 +1015,8 @@ def main():
                 continue
             if t.get("category") != "working":
                 continue
+            if t.get("stale"):
+                continue  # GPS ค้าง/เก่า → ตำแหน่งซ้ำเดิม ไม่เก็บ (กันเส้นปกติเพี้ยน)
             sp = t.get("speed")
             if sp is not None and sp <= 0:
                 continue
