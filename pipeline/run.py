@@ -652,8 +652,9 @@ def route_waypoints(route):
 
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
-             roster=None, drivers=None, gps2=None, prev_pos=None):
+             roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None):
     pois = pois or {}
+    future_dates = future_dates or set()
     prev_pos = prev_pos or {}
     home_st = pois.get(_norm(HOME_POI))
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
@@ -736,6 +737,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             heading = None
         head_out = heading is not None and 200 <= heading <= 340
         is_recent = fdate in recent_dates       # today or yesterday
+        is_future = fdate in future_dates       # ลงล่วงหน้า (พรุ่งนี้ขึ้นไป) = จองงานแล้ว รอออก
         # ทิศจากการเคลื่อนที่จริง (เทียบตำแหน่งรอบก่อน ~30 นาที) — แม่นกว่าเข็มทิศชั่วขณะ
         mv = None
         try:
@@ -797,7 +799,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 elif idx_now >= idx_out:
                     cat, reason = "find_return", f"ถึงปลายทางขาไป ({out_name}) แล้ว ส่งของแล้ว รอรับงานกลับ"
                 elif idx_now <= 1:
-                    if is_recent:
+                    if is_future:
+                        cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
+                    elif is_recent:
                         cat, reason = "working", "รับงานขาไปแล้ว กำลังจะออก"
                     else:
                         cat, reason = "find_outbound", "ว่าง พร้อมรับงานไป"
@@ -809,6 +813,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 elif idx_now <= 1:                # โซนบ้าน
                     if is_recent and (mv == "out" or head_out):
                         cat, reason = "working", f"เพิ่งออกงาน กำลังไปส่ง ({out_name})"
+                    elif is_future:
+                        cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                     else:
                         cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
                 elif mv == "home":
@@ -967,6 +973,7 @@ def main():
     now = datetime.now(timezone(timedelta(hours=7)))
     today = thai_today(now)
     recent_dates = {today, thai_today(now - timedelta(days=1))}  # today + yesterday
+    future_dates = {thai_today(now + timedelta(days=k)) for k in range(1, 15)}  # พรุ่งนี้..+14 วัน (งานลงล่วงหน้า = จองแล้ว รอออก)
     vehicles, realtime = pull_dtc(token)
     svc = drive_service(sa_json)
     fuel = parse_fuel(download_fuel(svc))
@@ -987,7 +994,7 @@ def main():
         pass
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
-                      roster, drivers, gps2, prev_pos)
+                      roster, drivers, gps2, prev_pos, future_dates)
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:
