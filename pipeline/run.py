@@ -477,7 +477,8 @@ def drive_service(sa_json):
 # ---------- ปฏิทินงาน -> assign-jobs.json (หน้าจัดงานในแอป) ----------
 CALENDAR_ID = "benzsince1989@gmail.com"       # ปฏิทินหลักที่ลงงาน (แชร์ให้ SA แบบ read-only)
 CAL_JOB_HOURS = (7, 21)                        # อ่านปฏิทินอัตโนมัติ 2 รอบ/วัน (เช้า/ค่ำ เวลาไทย)
-_KAN_RE = re.compile(r"^\s*(.+?)\s+(\d+)\s*คัน\s*$")   # title = "{ลูกค้า}-{ปลายทาง} N คัน"
+_KAN_RE = re.compile(r"\s+(\d+)\s*คัน\s*$")   # "... N คัน" ท้ายชื่อ
+_TAILNUM_RE = re.compile(r"(\d+)\s*$")        # เลขติดท้ายลูกค้า (เช่น "เตียเหลียง1")
 
 
 def calendar_service(sa_json):
@@ -488,22 +489,36 @@ def calendar_service(sa_json):
 
 
 def _job_from_event(ev):
-    """event ปฏิทิน -> job dict ถ้า title ตรง '{ลูกค้า}-{ปลายทาง} N คัน', ไม่งั้น None."""
+    """event ปฏิทิน -> job dict (ทุก event = งาน). None เฉพาะไม่มีชื่อ/วันที่.
+    จำนวนรถอ่าน 2 แบบ: '... N คัน' ท้ายชื่อ | เลขติดท้ายลูกค้า 'เตียเหลียงN-ปลายทาง'.
+    ไม่ระบุจำนวน = 1 คัน."""
     title = (ev.get("summary") or "").strip()
-    m = _KAN_RE.match(title)
-    if not m:
+    if not title:
         return None
-    route, n = m.group(1).strip(), int(m.group(2))
     st = ev.get("start") or {}
     date = st.get("date") or (st.get("dateTime") or "")[:10]   # all-day หรือ timed
     if not date:
         return None
+    count = None
+    route = title
+    m = _KAN_RE.search(title)                 # แบบ "N คัน"
+    if m:
+        count = int(m.group(1))
+        route = title[:m.start()].strip()
     if "-" in route:
         cust, dest = route.split("-", 1)
+        cust, dest = cust.strip(), dest.strip()
     else:
-        cust, dest = route, ""
-    return {"id": ev.get("id"), "date": date, "customer": cust.strip(),
-            "destination": dest.strip(), "count": n, "title": title}
+        cust, dest = route.strip(), ""
+    if count is None and "-" in route:        # แบบเลขติดท้ายลูกค้า (เฉพาะเส้นทางมี "-")
+        m2 = _TAILNUM_RE.search(cust)
+        if m2:
+            count = int(m2.group(1))
+            cust = cust[:m2.start()].strip()
+    if count is None:
+        count = 1
+    return {"id": ev.get("id"), "date": date, "customer": cust,
+            "destination": dest, "count": count, "title": title}
 
 
 def fetch_calendar_jobs(sa_json, now):
