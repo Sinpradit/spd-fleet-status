@@ -21,12 +21,14 @@ jobs:
     steps:
       # Enforce the 23:00-05:00 Thai quiet window for EVERY trigger, including
       # Apps Script workflow_dispatch (which runs promptly and ignores the cron window).
-      - name: Time gate (skip 23:00-05:00 Thai)
+      - name: Time gate (skip 23:00-05:00 Thai; manual dispatch always runs)
         id: gate
         run: |
           H=$(TZ=Asia/Bangkok date +%H)
-          echo "Thai hour = $H"
-          if [ "$H" -ge 23 ] || [ "$H" -lt 5 ]; then
+          echo "Thai hour = $H  (event: ${{ github.event_name }})"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "manual dispatch -> run regardless of quiet window"
+          elif [ "$H" -ge 23 ] || [ "$H" -lt 5 ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "quiet window (Thai ${H}:xx) - skipping."
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
