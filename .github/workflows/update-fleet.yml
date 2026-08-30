@@ -70,8 +70,8 @@ jobs:
         run: |
           git config user.name "fleet-bot"
           git config user.email "actions@github.com"
-          if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl|route-track.jsonl"; then
-            git add fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl 2>/dev/null || git add fleet-status.json tracks.json
+          if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl|route-track.jsonl|assign-jobs.json"; then
+            git add fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json 2>/dev/null || git add fleet-status.json tracks.json
             git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
             for i in 1 2 3; do
               git push && { echo "pushed update"; exit 0; }

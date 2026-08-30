@@ -474,6 +474,55 @@ def drive_service(sa_json):
     return gbuild("drive", "v3", credentials=creds, cache_discovery=False)
 
 
+# ---------- ปฏิทินงาน -> assign-jobs.json (หน้าจัดงานในแอป) ----------
+CALENDAR_ID = "benzsince1989@gmail.com"       # ปฏิทินหลักที่ลงงาน (แชร์ให้ SA แบบ read-only)
+CAL_JOB_HOURS = (7, 21)                        # อ่านปฏิทินอัตโนมัติ 2 รอบ/วัน (เช้า/ค่ำ เวลาไทย)
+_KAN_RE = re.compile(r"^\s*(.+?)\s+(\d+)\s*คัน\s*$")   # title = "{ลูกค้า}-{ปลายทาง} N คัน"
+
+
+def calendar_service(sa_json):
+    info = json.loads(sa_json.lstrip("﻿").strip())
+    creds = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/calendar.readonly"])
+    return gbuild("calendar", "v3", credentials=creds, cache_discovery=False)
+
+
+def _job_from_event(ev):
+    """event ปฏิทิน -> job dict ถ้า title ตรง '{ลูกค้า}-{ปลายทาง} N คัน', ไม่งั้น None."""
+    title = (ev.get("summary") or "").strip()
+    m = _KAN_RE.match(title)
+    if not m:
+        return None
+    route, n = m.group(1).strip(), int(m.group(2))
+    st = ev.get("start") or {}
+    date = st.get("date") or (st.get("dateTime") or "")[:10]   # all-day หรือ timed
+    if not date:
+        return None
+    if "-" in route:
+        cust, dest = route.split("-", 1)
+    else:
+        cust, dest = route, ""
+    return {"id": ev.get("id"), "date": date, "customer": cust.strip(),
+            "destination": dest.strip(), "count": n, "title": title}
+
+
+def fetch_calendar_jobs(sa_json, now):
+    """อ่านปฏิทินหลัก เอาเฉพาะ event ที่มี 'N คัน' ตั้งแต่วันนี้ถึง +60 วัน."""
+    svc = calendar_service(sa_json)
+    today = now.date().isoformat()
+    tmin = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    tmax = (now + timedelta(days=60)).isoformat()
+    resp = svc.events().list(calendarId=CALENDAR_ID, timeMin=tmin, timeMax=tmax,
+                             singleEvents=True, orderBy="startTime",
+                             maxResults=250).execute()
+    jobs = []
+    for ev in resp.get("items", []):
+        j = _job_from_event(ev)
+        if j and j["date"] >= today:
+            jobs.append(j)
+    return jobs
+
+
 def download_fuel(svc):
     buf = io.BytesIO()
     dl = MediaIoBaseDownload(buf, svc.files().get_media(fileId=FUEL_FILE_ID))
@@ -1078,6 +1127,19 @@ def main():
         print(f"tracks: {len(tr['tracks'])} trucks")
     except Exception as e:
         print("WARN: build_tracks failed ->", repr(e))
+    # --- งานจากปฏิทิน -> assign-jobs.json (อ่าน 2 รอบ/วัน เช้า/ค่ำ หรือรอบกดปุ่ม) ---
+    _manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    if _manual or (now.hour in CAL_JOB_HOURS and now.minute < 15):
+        try:
+            jobs = fetch_calendar_jobs(sa_json, now)
+            with open("assign-jobs.json", "w", encoding="utf-8") as f:
+                json.dump({"generated_at": now.isoformat(), "jobs": jobs},
+                          f, ensure_ascii=False, indent=1)
+            print(f"assign-jobs: {len(jobs)} jobs (calendar, manual={_manual})")
+        except Exception as e:
+            print("WARN: assign-jobs (calendar) failed ->", repr(e))
+    else:
+        print("assign-jobs: skip (นอกรอบอ่านปฏิทิน 07/21 น.)")
     n_eta = sum(1 for t in trucks if t.get("eta_hours"))
     n_st = sum(1 for t in trucks if t.get("at_station"))
     src = f"master-file({len(roster)})" if roster else "code-fallback"
