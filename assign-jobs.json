@@ -1,22 +1,6 @@
 {
- "generated_at": "2026-09-01T23:50:07.566576+07:00",
+ "generated_at": "2026-09-02T00:04:59.670580+07:00",
  "jobs": [
-  {
-   "id": "76fdh2i9ch4ronifiv6936g9mg",
-   "date": "2026-09-01",
-   "customer": "เจียเม้ง",
-   "destination": "นนทบุรี",
-   "count": 2,
-   "title": "เจียเม้ง-นนทบุรี 2 คัน"
-  },
-  {
-   "id": "cco3cp1m6sp64bb5ccqj6b9k6lh62bb16gp6ab9o6ssjcc1gc4pj2e9i68",
-   "date": "2026-09-01",
-   "customer": "เตียเหลียง",
-   "destination": "วีรับเบอร์",
-   "count": 1,
-   "title": "เตียเหลียง1-วีรับเบอร์"
-  },
   {
    "id": "48b83ih7ovshcp83k66b3jk4ko",
    "date": "2026-09-02",
