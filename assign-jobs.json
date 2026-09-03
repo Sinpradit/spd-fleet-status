@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-03T10:20:28.856998+07:00",
+ "generated_at": "2026-09-03T10:35:04.096083+07:00",
  "jobs": [
   {
    "id": "kp7sarap7nggj0pjim9l0bco8o",
@@ -56,14 +56,6 @@
    "destination": "วีรับเบอร์",
    "count": 1,
    "title": "เตียเหลียง1-วีรับเบอร์"
-  },
-  {
-   "id": "ihbnkg0ap5qm7edamqncub9j7c",
-   "date": "2026-09-17",
-   "customer": "เตียเหลียง",
-   "destination": "จงเช่อ",
-   "count": 7,
-   "title": "เตียเหลียง7-จงเช่อ"
   },
   {
    "id": "qejle6univerckd02e84esjc80",
