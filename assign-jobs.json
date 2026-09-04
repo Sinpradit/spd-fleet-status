@@ -1,22 +1,6 @@
 {
- "generated_at": "2026-09-04T23:49:59.404907+07:00",
+ "generated_at": "2026-09-05T00:05:09.525033+07:00",
  "jobs": [
-  {
-   "id": "kto7rsjkb5gkvb32tgatq5etgk",
-   "date": "2026-09-04",
-   "customer": "รับพาเลท",
-   "destination": "",
-   "count": 1,
-   "title": "รับพาเลท"
-  },
-  {
-   "id": "ngblvbk7fqa1gnufn63v4u1dl0",
-   "date": "2026-09-04",
-   "customer": "เจียเม้ง",
-   "destination": "นนทบุรี",
-   "count": 1,
-   "title": "เจียเม้ง-นนทบุรี 1 คัน"
-  },
   {
    "id": "6cs6ap9mclgjabb474o3cb9k60pmcbb2c8qm4b9mchgm2d1nccs64d1n6s",
    "date": "2026-09-06",
