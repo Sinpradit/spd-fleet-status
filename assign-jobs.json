@@ -1,30 +1,6 @@
 {
- "generated_at": "2026-09-10T23:50:00.033689+07:00",
+ "generated_at": "2026-09-11T00:05:03.344701+07:00",
  "jobs": [
-  {
-   "id": "6cro20ao1vot05d765sk9857r4",
-   "date": "2026-09-10",
-   "customer": "เจียเม้ง รถดั้ม",
-   "destination": "นนทบุรี",
-   "count": 4,
-   "title": "เจียเม้ง รถดั้ม 4-นนทบุรี"
-  },
-  {
-   "id": "hjreqsv7hdqjd87r8gp5r0lo78",
-   "date": "2026-09-10",
-   "customer": "เตียเหลียง",
-   "destination": "จงเช่อ",
-   "count": 7,
-   "title": "เตียเหลียง7-จงเช่อ"
-  },
-  {
-   "id": "t9uv94mirq84lgpi16jgl2vd4k",
-   "date": "2026-09-10",
-   "customer": "เจียเม้ง เทรลเลอร์",
-   "destination": "นนทบุรี",
-   "count": 4,
-   "title": "เจียเม้ง เทรลเลอร์ 4-นนทบุรี"
-  },
   {
    "id": "61hj4cb66kr66b9j6tgjeb9kccom8b9p6sqj4bb374o6ad35c9j3ecph6o",
    "date": "2026-09-13",
