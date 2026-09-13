@@ -1,22 +1,6 @@
 {
- "generated_at": "2026-09-13T23:49:57.601330+07:00",
+ "generated_at": "2026-09-14T00:04:58.168859+07:00",
  "jobs": [
-  {
-   "id": "06l8747vjqahqa3mmjj1eo387o",
-   "date": "2026-09-13",
-   "customer": "เจียเม้ง",
-   "destination": "สุพรรณ",
-   "count": 2,
-   "title": "เจียเม้ง 2-สุพรรณ"
-  },
-  {
-   "id": "61hj4cb66kr66b9j6tgjeb9kccom8b9p6sqj4bb374o6ad35c9j3ecph6o",
-   "date": "2026-09-13",
-   "customer": "เตียเหลียง",
-   "destination": "วีรับเบอร์",
-   "count": 1,
-   "title": "เตียเหลียง1-วีรับเบอร์"
-  },
   {
    "id": "3m9ifiu41dcdqdkouphjbfq5og",
    "date": "2026-09-15",
