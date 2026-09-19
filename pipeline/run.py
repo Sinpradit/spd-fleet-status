@@ -844,15 +844,20 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             if not has_return:
                 if zi >= COUNT:
                     cat, reason = "find_return", "เลยจุดนับขาไป รอรับงานกลับ (ประเมินจากโซน)"
+                elif zi <= 1 and is_future:      # งานลงล่วงหน้า = จองแล้ว รอออก
+                    cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                 elif zi <= 1 and not is_recent:
                     cat, reason = "find_outbound", "อยู่บ้าน งานเก่า → ว่าง (ประเมินจากโซน)"
                 else:
                     cat, reason = "working", "กำลังไปส่ง (ประเมินจากโซน)"
             else:
                 if zi <= 1:
-                    cat, reason = (("working", "เพิ่งออกงาน (ประเมินจากโซน)") if
-                                   (is_recent and head_out) else
-                                   ("find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"))
+                    if is_recent and head_out:
+                        cat, reason = "working", "เพิ่งออกงาน (ประเมินจากโซน)"
+                    elif is_future:              # งานลงล่วงหน้า = จองแล้ว รอออก
+                        cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
+                    else:
+                        cat, reason = "find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"
                 else:
                     cat, reason = "working", "กำลังขนกลับ (ประเมินจากโซน)"
         else:
