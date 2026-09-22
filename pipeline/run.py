@@ -60,6 +60,21 @@ GROUPS = {
                 "4100", "4102"],
 }
 GROUP_OF = {n: g for g, ns in GROUPS.items() for n in ns}
+
+
+def group_from_dtc(type_name):
+    """แปลง 'ประเภทรถ' ที่ตั้งในแอป DTC (จัดการข้อมูลรถ -> truck_type_name ใน realtime) เป็น key กลุ่ม.
+    ว่าง/ไม่รู้จัก -> None (ไป fallback รายการ GROUPS ในโค้ด). ทน typo เช่น 'พิ้นเรียบ'."""
+    t = (type_name or "").strip()
+    if not t:
+        return None
+    if "เรียบ" in t or "เทรลเลอร์" in t:
+        return "flatbed"
+    if "ดั้ม" in t or "ดัมพ์" in t or "dump" in t.lower():
+        return "dump"
+    if "คอก" in t:
+        return "pen"
+    return None
 GROUP_LABEL = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ", "other": "ไม่ระบุกลุ่ม"}
 GROUP_ORDER = ["dump", "pen", "flatbed", "other"]
 CAT_ORDER = ["find_outbound", "find_return", "working", "parked"]
@@ -733,7 +748,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
     trucks = []
     fleet = set(roster) if roster else set(GROUP_OF)   # roster จากไฟล์แม่แบบ (fallback: โค้ด)
     for num in sorted(fleet - EXCLUDE):
-        group = GROUP_OF.get(num, "other")             # รถใหม่ยังไม่ระบุกลุ่ม -> "ไม่ระบุกลุ่ม"
+        # กลุ่ม: ประเภทรถที่ตั้งในแอป DTC มาก่อน -> รายการในโค้ด -> "ไม่ระบุกลุ่ม"
+        group = (group_from_dtc((rt_by_num.get(num) or {}).get("truck_type_name"))
+                 or GROUP_OF.get(num, "other"))
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
         # job_key = ลายนิ้วมืองานในไฟล์น้ำมัน (เส้นทาง+วันที่) — โน้ตส่วนตัวในแอปเคลียร์เมื่อค่านี้เปลี่ยน (ลงงานใหม่).
