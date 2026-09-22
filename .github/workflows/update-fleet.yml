@@ -7,6 +7,11 @@ on:
     # Thailand has no DST, so this mapping is stable year-round. Public repo = free Actions minutes.
     - cron: "7,22,37,52 0-15,22,23 * * *"
   workflow_dispatch:
+    inputs:
+      set_group:
+        description: 'ตั้งกลุ่มรถจากแอป เช่น "4169:flatbed,4100:pen" (plate:auto = กลับไปอัตโนมัติ)'
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -46,6 +51,12 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: pip install --quiet openpyxl google-api-python-client google-auth
 
+      - name: Apply truck group override from app (set_group input)
+        if: steps.gate.outputs.run == 'true' && github.event.inputs.set_group != ''
+        env:
+          SET_GROUP: ${{ github.event.inputs.set_group }}
+        run: python pipeline/set_group.py "$SET_GROUP"
+
       - name: Run pipeline (retry transient upstream failures)
         if: steps.gate.outputs.run == 'true'
         env:
@@ -72,8 +83,8 @@ jobs:
         run: |
           git config user.name "fleet-bot"
           git config user.email "actions@github.com"
-          if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl|route-track.jsonl|assign-jobs.json"; then
-            git add fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json 2>/dev/null || git add fleet-status.json tracks.json
+          if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl|route-track.jsonl|assign-jobs.json|truck-groups.json"; then
+            git add fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json truck-groups.json 2>/dev/null || git add fleet-status.json tracks.json
             git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
             for i in 1 2 3; do
               git push && { echo "pushed update"; exit 0; }

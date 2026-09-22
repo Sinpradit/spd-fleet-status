@@ -76,6 +76,32 @@ def group_from_dtc(type_name):
         return "pen"
     return None
 GROUP_LABEL = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ", "other": "ไม่ระบุกลุ่ม"}
+MANUAL_GROUPS_FILE = "truck-groups.json"   # ตั้งจากแอป (หน้าจัดการข้อมูลรถ) ผ่าน workflow_dispatch set_group
+
+
+def load_manual_groups(path=MANUAL_GROUPS_FILE):
+    """{เลขรถ: กลุ่ม} ที่ตั้งจากแอป — ไม่มีไฟล์/พัง -> {}"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return {str(k): str(v) for k, v in (d.get("groups") or {}).items()
+                if str(v) in ("dump", "pen", "flatbed")}
+    except Exception:
+        return {}
+
+
+def resolve_group(num, manual_groups=None, rt=None):
+    """กลุ่มรถ + ที่มา: ตั้งจากแอป > ประเภทรถใน DTC > รายการในโค้ด > ไม่ระบุกลุ่ม
+    คืน (group, src) โดย src ∈ manual|dtc|code|none (แอปโชว์ที่มาในหน้าจัดการข้อมูลรถ)"""
+    mg = (manual_groups or {}).get(num)
+    if mg in ("dump", "pen", "flatbed"):
+        return mg, "manual"
+    dg = group_from_dtc((rt or {}).get("truck_type_name"))
+    if dg:
+        return dg, "dtc"
+    if num in GROUP_OF:
+        return GROUP_OF[num], "code"
+    return "other", "none"
 GROUP_ORDER = ["dump", "pen", "flatbed", "other"]
 CAT_ORDER = ["find_outbound", "find_return", "working", "parked"]
 CAT_LABEL = {"find_outbound": "หางานไป", "find_return": "หางานกลับ",
@@ -731,7 +757,8 @@ def route_waypoints(route):
 
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
-             roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None):
+             roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None,
+             manual_groups=None):
     pois = pois or {}
     future_dates = future_dates or set()
     prev_pos = prev_pos or {}
@@ -748,9 +775,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
     trucks = []
     fleet = set(roster) if roster else set(GROUP_OF)   # roster จากไฟล์แม่แบบ (fallback: โค้ด)
     for num in sorted(fleet - EXCLUDE):
-        # กลุ่ม: ประเภทรถที่ตั้งในแอป DTC มาก่อน -> รายการในโค้ด -> "ไม่ระบุกลุ่ม"
-        group = (group_from_dtc((rt_by_num.get(num) or {}).get("truck_type_name"))
-                 or GROUP_OF.get(num, "other"))
+        # กลุ่ม: ตั้งจากแอป > ประเภทรถใน DTC > รายการในโค้ด > "ไม่ระบุกลุ่ม"
+        group, gsrc = resolve_group(num, manual_groups, rt_by_num.get(num))
         f = fuel.get(num, {})
         route, fdate = f.get("route"), f.get("date")
         # job_key = ลายนิ้วมืองานในไฟล์น้ำมัน (เส้นทาง+วันที่) — โน้ตส่วนตัวในแอปเคลียร์เมื่อค่านี้เปลี่ยน (ลงงานใหม่).
@@ -783,7 +809,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     at_p = None
             reason = "ไม่มีคนขับ — รถจอด" + (f" · 📍{at_p}" if at_p else "")
             loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
-            trucks.append(dict(number=num, driver="", group=group, category="parked",
+            trucks.append(dict(number=num, driver="", group=group, group_src=gsrc, category="parked",
                                gps_status="รถจอด", province=prov, district=dist,
                                location_text=loc, destination=disp_dest, reason=reason,
                                lat=la, lon=lo, speed=spd, heading=None, updated=upd,
@@ -793,7 +819,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
 
         if rt is None:  # ไม่มี GPS ใน DTC (เช่น 1163, รถ GPS เจ้าที่ 2) -> ใช้ไฟล์ล้วน
             if not route:   # ไม่มีทั้ง GPS และงานในไฟล์ (เช่น รถใหม่รอเชื่อม GPS เจ้าที่ 2)
-                trucks.append(dict(number=num, driver=driver, group=group, category="working",
+                trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category="working",
                                    gps_status="รอเชื่อม GPS", province=None, district=None,
                                    location_text="—", destination=None,
                                    reason="รอเชื่อมข้อมูล GPS (เจ้าที่ 2) / ยังไม่มีงานในไฟล์",
@@ -803,7 +829,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             cat = "find_outbound" if has_return else "find_return"
             reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
                       else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
-            trucks.append(dict(number=num, driver=driver, group=group, category=cat,
+            trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat,
                                gps_status="ไม่มี GPS", province=None, district=None,
                                location_text="—", destination=disp_dest, reason=reason, lat=None,
                                lon=None, speed=None, heading=None, updated=None,
@@ -1018,7 +1044,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             if rt.get("_stale"):
                 reason += f" (ข้อมูลเมื่อ {(rt.get('time') or '')[11:16]})"
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
-        trucks.append(dict(number=num, driver=driver, group=group, category=cat,
+        trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat,
                            gps_status=rt.get("status_name_th") or "", province=prov,
                            district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
@@ -1065,6 +1091,7 @@ def main():
     fuel = parse_fuel(download_fuel(svc))
     pois = fetch_pois(token)
     roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
+    manual_groups = load_manual_groups()     # กลุ่มที่ตั้งจากแอป (truck-groups.json)
     gps2 = fetch_gps2(svc, now)              # รถ GPS เจ้าที่ 2 (webhook -> Drive)
     # ตำแหน่งรอบก่อน (จากไฟล์เดิมใน repo) — ใช้ดูทิศการเคลื่อนที่จริง
     prev_pos = {}
@@ -1080,7 +1107,7 @@ def main():
         pass
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
-                      roster, drivers, gps2, prev_pos, future_dates)
+                      roster, drivers, gps2, prev_pos, future_dates, manual_groups)
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:
