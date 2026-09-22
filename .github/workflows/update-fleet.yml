@@ -83,15 +83,19 @@ jobs:
         run: |
           git config user.name "fleet-bot"
           git config user.email "actions@github.com"
-          if git status --porcelain | grep -qE "fleet-status.json|tracks.json|gps2-history.jsonl|route-track.jsonl|assign-jobs.json|truck-groups.json"; then
-            git add fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json truck-groups.json 2>/dev/null || git add fleet-status.json tracks.json
-            git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
-            for i in 1 2 3; do
-              git push && { echo "pushed update"; exit 0; }
-              echo "push rejected, rebasing (attempt $i)"
-              git pull --rebase -X theirs origin main
-            done
-            git push && echo "pushed update (final)" || { echo "push failed after retries"; exit 1; }
-          else
-            echo "no change"
+          # stage ทีละไฟล์เฉพาะที่มีอยู่จริง — run ที่ต่อคิวจะ checkout SHA เก่าตอนถูกสั่ง
+          # ไฟล์ใหม่ (เช่น truck-groups.json) อาจยังไม่มี; git add รายการเดียวรวดจะล้มทั้งชุด
+          # แล้วเหลือไฟล์ไม่ได้ stage -> rebase ตอน push ชนกันล้ม ("unstaged changes")
+          for f in fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json truck-groups.json; do
+            if [ -e "$f" ]; then git add "$f"; fi
+          done
+          if git diff --cached --quiet; then
+            echo "no change"; exit 0
           fi
+          git commit -m "Update fleet data [skip ci] $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git push && { echo "pushed update"; exit 0; }
+            echo "push rejected, rebasing (attempt $i)"
+            git pull --rebase --autostash -X theirs origin main
+          done
+          git push && echo "pushed update (final)" || { echo "push failed after retries"; exit 1; }
