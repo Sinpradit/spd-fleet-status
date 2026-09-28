@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-28T12:49:59.941461+07:00",
+ "generated_at": "2026-09-28T13:05:04.372525+07:00",
  "jobs": [
   {
    "id": "7u4ooud15cbl7797ck0p26si70",
@@ -8,6 +8,14 @@
    "destination": "วีรับเบอร์",
    "count": 1,
    "title": "เตียเหลียง1-วีรับเบอร์"
+  },
+  {
+   "id": "cdhm4c3568o3gb9pcgp30b9kcphm2bb16tj3cb9icgp32c1k6dhmad1k6o",
+   "date": "2026-09-30",
+   "customer": "Cyy 34 ตัน",
+   "destination": "",
+   "count": 2,
+   "title": "Cyy 34 ตัน 2 คัน"
   },
   {
    "id": "li98vt7hknsstb9ja318omm6qc",
