@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-02T16:20:03.218682+07:00",
+ "generated_at": "2026-10-02T16:34:58.041104+07:00",
  "jobs": [
   {
    "id": "hj63tm4fmh70p5r3pftobin728",
@@ -8,6 +8,14 @@
    "destination": "เซ็นจูรี่",
    "count": 7,
    "title": "เตียเหลียง 7-เซ็นจูรี่"
+  },
+  {
+   "id": "3h98ejg0cfegn4s1imk6pnjqlo",
+   "date": "2026-10-03",
+   "customer": "เจียเม้ง",
+   "destination": "นำเชา",
+   "count": 1,
+   "title": "เจียเม้ง1-นำเชา"
   },
   {
    "id": "78r8m8melot44akovo5k00vhbk",
