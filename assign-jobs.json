@@ -1,38 +1,6 @@
 {
- "generated_at": "2026-10-04T23:49:59.030411+07:00",
+ "generated_at": "2026-10-05T00:05:34.709189+07:00",
  "jobs": [
-  {
-   "id": "78r8m8melot44akovo5k00vhbk",
-   "date": "2026-10-04",
-   "customer": "เจียเม้ง",
-   "destination": "สุพรรณบุรี",
-   "count": 2,
-   "title": "เจียเม้ง2-สุพรรณบุรี"
-  },
-  {
-   "id": "aikucjnoicp4hh61stkv8sgamc",
-   "date": "2026-10-04",
-   "customer": "เจียเม้ง",
-   "destination": "นนทบุรี",
-   "count": 1,
-   "title": "เจียเม้ง1-นนทบุรี"
-  },
-  {
-   "id": "qb1sh0n562c4h7iglst45fsn3g",
-   "date": "2026-10-04",
-   "customer": "เตียเหลียง",
-   "destination": "วีรับเบอร์",
-   "count": 1,
-   "title": "เตียเหลียง1-วีรับเบอร์"
-  },
-  {
-   "id": "sshpu6helejf5ejlaiqe9hk6bk",
-   "date": "2026-10-04",
-   "customer": "พูนศักดิ์",
-   "destination": "นนทบุรี",
-   "count": 4,
-   "title": "พูนศักดิ์ 4-นนทบุรี"
-  },
   {
    "id": "8palk6g3klqo7ca5pns9mu6oek",
    "date": "2026-10-06",
