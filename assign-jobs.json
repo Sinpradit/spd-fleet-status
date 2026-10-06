@@ -1,30 +1,6 @@
 {
- "generated_at": "2026-10-06T23:50:02.622307+07:00",
+ "generated_at": "2026-10-07T00:05:01.594252+07:00",
  "jobs": [
-  {
-   "id": "8palk6g3klqo7ca5pns9mu6oek",
-   "date": "2026-10-06",
-   "customer": "เตียเหลียง",
-   "destination": "วีรับเบอร์",
-   "count": 1,
-   "title": "เตียเหลียง1-วีรับเบอร์"
-  },
-  {
-   "id": "cdhm4c3568o3gb9pcgp30b9kcphm2bb16tj3cb9icgp32c1k6dhmad1k6o",
-   "date": "2026-10-06",
-   "customer": "Cyy 34 ตัน",
-   "destination": "",
-   "count": 1,
-   "title": "Cyy 34 ตัน 1 คัน"
-  },
-  {
-   "id": "hd9i07h4rdid7ehsmbopsq3mtc",
-   "date": "2026-10-06",
-   "customer": "ชัยวัฒนา",
-   "destination": "สระบุรี",
-   "count": 1,
-   "title": "ชัยวัฒนา1-สระบุรี"
-  },
   {
    "id": "rs7musk9l910uib5h1sdspp0hk",
    "date": "2026-10-07",
