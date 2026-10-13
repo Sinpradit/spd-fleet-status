@@ -1,22 +1,6 @@
 {
- "generated_at": "2026-10-13T23:49:58.428916+07:00",
+ "generated_at": "2026-10-14T00:05:03.400812+07:00",
  "jobs": [
-  {
-   "id": "7tkg6rcejffkmjeppvvhplhfp8",
-   "date": "2026-10-13",
-   "customer": "เตียเหลียง",
-   "destination": "วีรับเบอร์",
-   "count": 1,
-   "title": "เตียเหลียง1-วีรับเบอร์"
-  },
-  {
-   "id": "k9l6lpvr7793g3kvg8c5ejmi00",
-   "date": "2026-10-13",
-   "customer": "กิจอุดม",
-   "destination": "urc",
-   "count": 1,
-   "title": "กิจอุดม1-urc"
-  },
   {
    "id": "0uovla7hu1rm2kap3eq39biu8o",
    "date": "2026-10-14",
