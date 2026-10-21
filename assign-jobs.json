@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-21T14:34:58.413485+07:00",
+ "generated_at": "2026-10-21T14:50:00.989366+07:00",
  "jobs": [
   {
    "id": "047pgdinn98fu0hbro7hhdpccc",
@@ -32,6 +32,14 @@
    "destination": "เฮียเหลา",
    "count": 1,
    "title": "เจียเม้ง 1-เฮียเหลา"
+  },
+  {
+   "id": "qkapj47q04ja6rqppuamn46550",
+   "date": "2026-10-31",
+   "customer": "เตียเหลียง",
+   "destination": "จงเซ่อ",
+   "count": 7,
+   "title": "เตียเหลียง7-จงเซ่อ"
   },
   {
    "id": "el5k2vtt7m3endhc9862b9lm0g",
