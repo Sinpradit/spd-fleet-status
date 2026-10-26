@@ -104,6 +104,20 @@ def resolve_group(num, manual_groups=None, rt=None):
     return "other", "none"
 GROUP_ORDER = ["dump", "pen", "flatbed", "other"]
 CAT_ORDER = ["find_outbound", "find_return", "working", "parked"]
+
+
+def leg_of(cat, reason):
+    """ทิศงานของรถหมวดกำลังทำงาน (แอปใช้แบ่ง "งานไป" / "งานกลับ"):
+    out = ขาไป (รอออก/กำลังจะออก/เพิ่งออกงาน/กำลังไปส่ง) · back = ขากลับ (กำลังขนกลับ/ส่งของแล้วมีงานกลับต่อ)
+    None = ไม่ทราบ (เช่น รอเชื่อม GPS) หรือไม่ใช่หมวดกำลังทำงาน"""
+    if cat != "working":
+        return None
+    r = reason or ""
+    if "ขนกลับ" in r or "งานกลับ" in r:
+        return "back"
+    if any(k in r for k in ("ไปส่ง", "รอออก", "ออกงาน", "กำลังจะออก")):
+        return "out"
+    return None
 CAT_LABEL = {"find_outbound": "หางานไป", "find_return": "หางานกลับ",
              "working": "อยู่ระหว่างทำงาน", "parked": "รถจอด"}
 EXCLUDE = {"2168", "1288", "1250"}
@@ -829,7 +843,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             cat = "find_outbound" if has_return else "find_return"
             reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
                       else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
-            trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat,
+            trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat, leg=leg_of(cat, reason),
                                gps_status="ไม่มี GPS", province=None, district=None,
                                location_text="—", destination=disp_dest, reason=reason, lat=None,
                                lon=None, speed=None, heading=None, updated=None,
@@ -1044,7 +1058,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             if rt.get("_stale"):
                 reason += f" (ข้อมูลเมื่อ {(rt.get('time') or '')[11:16]})"
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
-        trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat,
+        trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat, leg=leg_of(cat, reason),
                            gps_status=rt.get("status_name_th") or "", province=prov,
                            district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
