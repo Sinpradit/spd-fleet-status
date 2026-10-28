@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-28T08:34:58.995404+07:00",
+ "generated_at": "2026-10-28T08:49:59.438914+07:00",
  "jobs": [
   {
    "id": "mc9fgfv89h5vqltn88mupl3t0s",
@@ -40,6 +40,14 @@
    "destination": "เฮียเหลา",
    "count": 1,
    "title": "เจียเม้ง 1-เฮียเหลา"
+  },
+  {
+   "id": "74tke22l6op3a9u3khfa6kngrc",
+   "date": "2026-11-04",
+   "customer": "เตียเหลียง",
+   "destination": "เซ็นจูรี่",
+   "count": 7,
+   "title": "เตียเหลียง7-เซ็นจูรี่"
   },
   {
    "id": "ftpqe1dp15g923pf3rqeas8eb4",
