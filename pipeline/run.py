@@ -113,7 +113,7 @@ def leg_of(cat, reason):
     if cat != "working":
         return None
     r = reason or ""
-    if "ขนกลับ" in r or "งานกลับ" in r:
+    if "ขนกลับ" in r or "งานกลับ" in r or "ขากลับ" in r:   # รวม "อยู่ที่ X — รับของขากลับ"
         return "back"
     if any(k in r for k in ("ไปส่ง", "รอออก", "ออกงาน", "กำลังจะออก")):
         return "out"
