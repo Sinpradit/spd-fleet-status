@@ -1,22 +1,6 @@
 {
- "generated_at": "2026-10-31T23:50:00.367684+07:00",
+ "generated_at": "2026-11-01T00:05:02.420807+07:00",
  "jobs": [
-  {
-   "id": "pq69g5pg92bkiaucivmacjcje4",
-   "date": "2026-10-31",
-   "customer": "เตียเหลียง",
-   "destination": "แหลมฉบัง",
-   "count": 2,
-   "title": "เตียเหลียง2-แหลมฉบัง"
-  },
-  {
-   "id": "qkapj47q04ja6rqppuamn46550",
-   "date": "2026-10-31",
-   "customer": "เตียเหลียง",
-   "destination": "จงเซ่อ",
-   "count": 7,
-   "title": "เตียเหลียง7-จงเซ่อ"
-  },
   {
    "id": "94a3c0tm63absqh8irldi5j6ng",
    "date": "2026-11-02",
