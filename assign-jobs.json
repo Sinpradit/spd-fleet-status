@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-06T09:50:05.978933+07:00",
+ "generated_at": "2026-11-06T10:05:02.800890+07:00",
  "jobs": [
   {
    "id": "hjajk8dgkam9itu6m1jtsos4q4",
@@ -24,6 +24,14 @@
    "destination": "เซ็นจูรี่",
    "count": 7,
    "title": "เตียเหลียง7-เซ็นจูรี่"
+  },
+  {
+   "id": "gve1r194ct5ps03n9ba55ogjrc",
+   "date": "2026-11-11",
+   "customer": "กิจอุดม",
+   "destination": "สยามเกรน",
+   "count": 1,
+   "title": "กิจอุดม1-สยามเกรน"
   },
   {
    "id": "j76mvpvc34v93oitgtgap7odjk",
