@@ -22,7 +22,9 @@ from googleapiclient.http import MediaIoBaseDownload
 
 # ---------- constants ----------
 DTC_BASE = "https://gps.dtc.co.th:8099"
-FUEL_FILE_ID = "1tf9x5I7ombD15wV-89KRLn-F_7Kco7MA"
+FUEL_FILE_ID = "1E-cflW4meaIDhXrv9BxTd1FCXdhX08MUkZnW0DL8Ras"   # ไฟล์ "น้ำมัน" (Google Sheet) ตั้งแต่ 12 พย 69
+# (xlsx ตัวเก่า 1tf9x5I7... ถูกเปลี่ยนชื่อเป็น "น้ำมัน(ไม่ใช้).xlsx" — ห้ามกลับไปใช้)
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # ไฟล์แม่แบบรถ+คนขับ (Google Sheet "ทะเบียน-คนขับ-สินประดิษฐ์") — เพิ่ม/ลบรถ แก้คนขับ ที่นี่ที่เดียว
 MASTER_FILE_ID = "1PoZlg99nOb6zuGJto95ibMyv-4_9f3CGNlHUqBZexIM"
 # ไฟล์ข้อมูล GPS เจ้าที่ 2 (vendor POST เข้า webhook ทุก 30 นาที)
@@ -594,8 +596,16 @@ def fetch_calendar_jobs(sa_json, now):
 
 
 def download_fuel(svc):
+    """ไฟล์น้ำมัน -> xlsx ในหน่วยความจำ (ให้ parse_fuel/openpyxl อ่านแบบเดิม)
+    Google Sheet = export เป็น xlsx (ได้ค่าที่คำนวณแล้วของสูตร · Drive จำกัด export ~10MB, ตอนนี้ ~4MB)
+    xlsx ที่ฝากบน Drive = โหลดตรง"""
+    mime = svc.files().get(fileId=FUEL_FILE_ID, fields="mimeType").execute().get("mimeType")
+    if mime == "application/vnd.google-apps.spreadsheet":
+        req = svc.files().export_media(fileId=FUEL_FILE_ID, mimeType=XLSX_MIME)
+    else:
+        req = svc.files().get_media(fileId=FUEL_FILE_ID)
     buf = io.BytesIO()
-    dl = MediaIoBaseDownload(buf, svc.files().get_media(fileId=FUEL_FILE_ID))
+    dl = MediaIoBaseDownload(buf, req)
     done = False
     while not done:
         _, done = dl.next_chunk()
