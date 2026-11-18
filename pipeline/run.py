@@ -438,8 +438,26 @@ def thai_today(now):
     return f"{now.day} {THAI_MONTH[now.month]} {(now.year + 543) % 100:02d}"
 
 
+_dtc_down = False   # DTC ค้าง/ล่มในรอบนี้ → เลิกเรียกต่อทั้งรอบ (ส่วนอื่นยังอัปเดต ด้วยตำแหน่งล่าสุดที่มี)
+
+
+def dtc_available():
+    return not _dtc_down
+
+
+def _is_timeout(e):
+    return isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError)
+
+
 def dtc_post(path, body, retries=3):
+    """เรียก DTC API · หลุดเป็นพัก ๆ (TLS reset) = ลองซ้ำ (เว้น 4,8,12 วิ)
+    · ค้างจนหมดเวลา 2 ครั้ง = DTC ล่ม → ตั้ง _dtc_down แล้วไม่เรียกซ้ำทั้งรอบ
+      (เดิมลองครบทุกครั้ง + ทั้งรอบซ้ำ 4 หน = รอบละ ~16 นาที เกินรอบ 15 นาที รอบถัดไปโดนยกเลิก)"""
+    global _dtc_down
+    if _dtc_down:
+        raise RuntimeError("DTC unavailable (this run)")
     last = None
+    timeouts = 0
     for i in range(retries + 1):
         try:
             req = urllib.request.Request(
@@ -449,6 +467,11 @@ def dtc_post(path, body, retries=3):
                 return json.loads(r.read().decode("utf-8"))
         except Exception as e:              # DTC หลุดเป็นพัก ๆ (TLS reset) — ลองซ้ำก่อนยอมแพ้
             last = e
+            if _is_timeout(e):
+                timeouts += 1
+                if timeouts >= 2:
+                    _dtc_down = True
+                    break
             if i < retries:
                 import time
                 time.sleep(4 * (i + 1))     # 4,8,12s ≈ 24s window ต่อ 1 รอบ run
@@ -522,6 +545,68 @@ def build_tracks(token, vehicles, roster, now):
             tracks[num] = downsample(cleaned)
     return {"generated_at": now.isoformat(), "date": now.strftime("%Y-%m-%d"),
             "tracks": tracks}
+
+
+# ---------- DTC ล่ม: ใช้ข้อมูลรอบก่อนแทน (ส่วนอื่นยังอัปเดตต่อ) ----------
+_TYPE_WORD = {"dump": "ดั้ม", "pen": "คอก", "flatbed": "พื้นเรียบ"}
+
+
+def _iter_trucks(doc):
+    for c in (doc or {}).get("categories", []):
+        for g in c.get("groups", []):
+            yield from g.get("trucks", [])
+
+
+def stale_realtime(prev_doc):
+    """DTC ล่ม: สร้าง record แบบ DTC จากตำแหน่งล่าสุดในรอบก่อน (fleet-status.json เดิม)
+    → classify ทำงานเหมือนเดิม (งานจากไฟล์น้ำมันยังอัปเดต) แต่ติด _stale: ไม่คิด ETA/นอกเส้นทาง
+    + ป้าย "GPS ขาด (ตำแหน่งล่าสุด HH:MM)" · ประเภทรถที่มาจาก DTC คงตามรอบก่อน"""
+    out = []
+    for t in _iter_trucks(prev_doc):
+        if not (t.get("lat") and t.get("lon")):
+            continue
+        out.append({
+            "truck_name": f"70-{t['number']}", "lat": t["lat"], "lon": t["lon"],
+            "province_th": t.get("province"), "district_th": t.get("district"),
+            "heading": t.get("heading"), "gps_speed": None, "time": t.get("updated"),
+            "status_name_th": "GPS ขาด",
+            "truck_type_name": (_TYPE_WORD.get(t.get("group"))
+                                if t.get("group_src") == "dtc" else None),
+            "_stale": True, "_dtc_stale": True,
+        })
+    return out
+
+
+def stale_pois(prev_doc):
+    """สถานีสำรองตอนดึง POI จาก DTC ไม่ได้: สถานีที่รถเคยอยู่ในรอบก่อน (ชื่อ + พิกัดรถตอนนั้น)
+    → station_of / match_dest_poi ใช้ต่อได้ (รถตำแหน่งเดิม = สถานีเดิม)"""
+    out = {}
+    for t in _iter_trucks(prev_doc):
+        name, la, lo = t.get("at_station"), t.get("lat"), t.get("lon")
+        if not (name and la and lo):
+            continue
+        key = _norm(name)
+        if key in out:                       # สถานีเดียวกันหลายคัน — เก็บทุกจุด (key หลักยังค้นด้วยชื่อได้)
+            key = f"{key}#{t['number']}"
+        out[key] = {"name": name, "lat": la, "lon": lo, "radius": 150, "poly": None}
+    return out
+
+
+def prev_tracks_today(now):
+    """DTC ล่ม: ใช้เส้นทางวันนี้ที่สร้างไว้ก่อนหน้า (ไม่ดึงประวัติใหม่) — ข้ามวัน = เริ่มว่าง"""
+    today = now.strftime("%Y-%m-%d")
+    try:
+        with open("tracks.json", encoding="utf-8") as f:
+            old = json.load(f)
+        tracks = dict(old.get("tracks") or {}) if old.get("date") == today else {}
+    except Exception:
+        tracks = {}
+    return {"generated_at": now.isoformat(), "date": today, "tracks": tracks}
+
+
+def _gps_lost_suffix(rt):
+    hhmm = (rt.get("time") or "")[11:16]
+    return f" · GPS ขาด (ตำแหน่งล่าสุด {hhmm})" if hhmm else " · GPS ขาด"
 
 
 def drive_service(sa_json):
@@ -792,9 +877,9 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
     for r in realtime:
         num = (r.get("truck_name") or "").replace("70-", "") or num_by_gps.get(r.get("gps_id"), "")
         rt_by_num[num] = r
-    # เติมรถจาก GPS เจ้าที่ 2 (เฉพาะคันที่ DTC ไม่มี)
+    # เติมรถจาก GPS เจ้าที่ 2 (คันที่ DTC ไม่มี — หรือมีแค่ตำแหน่งค้างจากรอบก่อนตอน DTC ล่ม)
     for num, r in (gps2 or {}).items():
-        if num not in rt_by_num:
+        if num not in rt_by_num or rt_by_num[num].get("_dtc_stale"):
             rt_by_num[num] = r
     trucks = []
     fleet = set(roster) if roster else set(GROUP_OF)   # roster จากไฟล์แม่แบบ (fallback: โค้ด)
@@ -832,12 +917,15 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 except (TypeError, ValueError):
                     at_p = None
             reason = "ไม่มีคนขับ — รถจอด" + (f" · 📍{at_p}" if at_p else "")
+            if rt is not None and rt.get("_dtc_stale"):
+                reason += _gps_lost_suffix(rt)
             loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
             trucks.append(dict(number=num, driver="", group=group, group_src=gsrc, category="parked",
                                gps_status="รถจอด", province=prov, district=dist,
                                location_text=loc, destination=disp_dest, reason=reason,
                                lat=la, lon=lo, speed=spd, heading=None, updated=upd,
-                               from_file=rt is None, stale=False, at_station=at_p,
+                               from_file=rt is None, stale=bool(rt and rt.get("_stale")),
+                               at_station=at_p,
                                eta_hours=None, fuel=fu, off_route=False, job_key=jk))
             continue
 
@@ -862,6 +950,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
 
         prov, dist = rt.get("province_th"), rt.get("district_th")
         idx_now = PROV_IDX.get(prov)
+        dtc_stale = bool(rt.get("_dtc_stale"))   # DTC ล่ม: ตำแหน่งล่าสุดจากรอบก่อน (ไม่รู้ว่าตอนนี้รถอยู่ไหน)
         try:
             heading = float(rt.get("heading")) if rt.get("heading") is not None else None
         except (TypeError, ValueError):
@@ -970,7 +1059,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # --- ETA ต่อท้ายเหตุผล (ทุกคันใน 3 หมวดที่มีพิกัด รวมงานทอย) ---
         # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่น = ETA กลับถึงฐาน
         eta_h = None
-        if tlat and tlon:
+        if tlat and tlon and not dtc_stale:      # ตำแหน่งค้าง = ไม่รู้ระยะจริง → ไม่บอก ETA
             def _eta_to(dlat, dlon):
                 """OSRM ก่อน; ล่มก็ประมาณจากระยะทางตรง (คูณแฟกเตอร์ถนน 1.3, 60 กม./ชม.)"""
                 h = osrm_eta_hours(tlat, tlon, dlat, dlon)
@@ -1051,7 +1140,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # --- เฟส 4: ตรวจนอกเส้นทาง (เฉพาะช่วงกำลังวิ่งไปส่ง และไม่ได้อยู่ในสถานีบริษัท) ---
         off = None
         if (cat == "working" and tlat and tlon and not is_toy and not at_st
-                and "กำลังไปส่ง" in reason):
+                and not dtc_stale and "กำลังไปส่ง" in reason):
             dest_prov = resolve_province(out_name) if out_name else None
             off = off_route_check(tlat, tlon, prov, dest_prov,
                                   pois.get(_norm(HOME_POI)), dest_poi)
@@ -1067,6 +1156,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             reason += " · GPS เจ้าที่ 2"
             if rt.get("_stale"):
                 reason += f" (ข้อมูลเมื่อ {(rt.get('time') or '')[11:16]})"
+        if dtc_stale:
+            reason += _gps_lost_suffix(rt)
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
         trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat, leg=leg_of(cat, reason),
                            gps_status=rt.get("status_name_th") or "", province=prov,
@@ -1104,31 +1195,43 @@ def build_doc(trucks, now):
 
 
 def main():
+    global _dtc_down
     token = os.environ["DTC_TOKEN"]
     sa_json = os.environ["GDRIVE_SA_KEY"]
     now = datetime.now(timezone(timedelta(hours=7)))
     today = thai_today(now)
     recent_dates = {today, thai_today(now - timedelta(days=1))}  # today + yesterday
     future_dates = {thai_today(now + timedelta(days=k)) for k in range(1, 15)}  # พรุ่งนี้..+14 วัน (งานลงล่วงหน้า = จองแล้ว รอออก)
-    vehicles, realtime = pull_dtc(token)
+    # DTC ล่ม/ค้าง → ไม่ล้มทั้งรอบ: ไฟล์น้ำมัน, GPS เจ้าที่ 2, ทะเบียน, ปฏิทิน ยังอัปเดตต่อ
+    # รถ DTC ใช้ตำแหน่งล่าสุดจากรอบก่อน + ป้าย "GPS ขาด (ตำแหน่งล่าสุด HH:MM)"
+    try:
+        vehicles, realtime = pull_dtc(token)
+        dtc_ok = True
+    except Exception as e:
+        _dtc_down = True
+        dtc_ok = False
+        vehicles, realtime = [], []
+        print(f"::warning title=DTC down::DTC ไม่ตอบ ({e!r:.150}) — ใช้ตำแหน่งล่าสุดจากรอบก่อน")
     svc = drive_service(sa_json)
     fuel = parse_fuel(download_fuel(svc))
     pois = fetch_pois(token)
     roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
     manual_groups = load_manual_groups()     # กลุ่มที่ตั้งจากแอป (truck-groups.json)
     gps2 = fetch_gps2(svc, now)              # รถ GPS เจ้าที่ 2 (webhook -> Drive)
-    # ตำแหน่งรอบก่อน (จากไฟล์เดิมใน repo) — ใช้ดูทิศการเคลื่อนที่จริง
-    prev_pos = {}
+    # รอบก่อน (ไฟล์เดิมใน repo): ตำแหน่งเดิมไว้ดูทิศการเคลื่อนที่จริง + ใช้แทนตอน DTC ล่ม
+    prev_doc = {}
     try:
         with open("fleet-status.json", encoding="utf-8") as f:
-            pd = json.load(f)
-        for c in pd.get("categories", []):
-            for g in c.get("groups", []):
-                for t in g.get("trucks", []):
-                    if t.get("lat") and t.get("lon"):
-                        prev_pos[t["number"]] = (t["lat"], t["lon"])
+            prev_doc = json.load(f)
     except Exception:
         pass
+    prev_pos = {t["number"]: (t["lat"], t["lon"]) for t in _iter_trucks(prev_doc)
+                if t.get("lat") and t.get("lon")}
+    if not dtc_ok:
+        realtime = stale_realtime(prev_doc)
+    if not pois:                             # ดึงสถานีจาก DTC ไม่ได้ → สถานีที่รถเคยอยู่ในรอบก่อน
+        pois = stale_pois(prev_doc)
+        print(f"WARN: DTC POIs unavailable -> {len(pois)} stations from previous run")
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
                       roster, drivers, gps2, prev_pos, future_dates, manual_groups)
@@ -1174,12 +1277,23 @@ def main():
     except Exception as e:
         print("WARN: route-track append failed ->", repr(e))
     doc = build_doc(trucks, now)
+    # สถานะ GPS DTC รอบนี้ · dtc_last_ok = รอบล่าสุดที่ DTC ตอบ (แอปรุ่นหน้าใช้ขึ้นแถบเตือนได้)
+    doc["dtc_ok"] = dtc_ok
+    doc["dtc_last_ok"] = (now.isoformat() if dtc_ok
+                          else prev_doc.get("dtc_last_ok") or prev_doc.get("generated_at"))
     with open("fleet-status.json", "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
     # เส้นทางที่วิ่งวันนี้ (สำหรับหน้าแผนที่) — พังก็ไม่ล้มรอบหลัก
     try:
         fleet_nums = sorted((set(roster) if roster else set(GROUP_OF)) - EXCLUDE)
-        tr = build_tracks(token, vehicles, fleet_nums, now)
+        prev_tr = prev_tracks_today(now)
+        if dtc_ok and dtc_available():
+            tr = build_tracks(token, vehicles, fleet_nums, now)
+            if not dtc_available():          # DTC ล่มกลางทาง → คันที่ดึงไม่ทันใช้ของเดิม
+                for k, v in prev_tr["tracks"].items():
+                    tr["tracks"].setdefault(k, v)
+        else:
+            tr = prev_tr                     # DTC ล่ม → คงเส้นทางวันนี้ที่มีอยู่ (ไม่ดึงใหม่)
         # รถ GPS เจ้าที่ 2: สร้างเส้นทางจากประวัติที่เราสะสมเอง (gps2-history.jsonl)
         try:
             today_str = now.strftime("%Y-%m-%d")
@@ -1204,7 +1318,8 @@ def main():
                                                      int(rec.get("speed") or 0),
                                                      (int(fu) if fu is not None else None)]
             for num, bym in g2pts.items():
-                if num not in tr["tracks"]:
+                # DTC ล่ม = tracks มาจากรอบก่อน → เส้นทางรถเจ้าที่ 2 ต้องทับด้วยของสด
+                if num not in tr["tracks"] or not dtc_available():
                     pts = [bym[k] for k in sorted(bym)]
                     if pts:
                         tr["tracks"][num] = downsample(pts)
@@ -1231,7 +1346,7 @@ def main():
     n_eta = sum(1 for t in trucks if t.get("eta_hours"))
     n_st = sum(1 for t in trucks if t.get("at_station"))
     src = f"master-file({len(roster)})" if roster else "code-fallback"
-    print(f"today={today} recent={sorted(recent_dates)} vehicles={len(vehicles)} "
+    print(f"today={today} dtc_ok={dtc_ok} recent={sorted(recent_dates)} vehicles={len(vehicles)} "
           f"realtime={len(realtime)} trucks={len(trucks)} roster={src} pois={len(pois)} "
           f"at_station={n_st} eta={n_eta} summary={doc['summary']}")
     if unknown:

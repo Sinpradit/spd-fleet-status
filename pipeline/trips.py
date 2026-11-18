@@ -9,8 +9,8 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 
-from run import (dtc_post, fetch_history, fetch_pois, _haversine_m, _norm,
-                 EXCLUDE, GROUP_OF)
+from run import (dtc_post, dtc_available, fetch_history, fetch_pois, _haversine_m,
+                 _norm, EXCLUDE, GROUP_OF)
 
 DAYS_BACK = 7            # สแกนย้อนหลังกี่วัน (เที่ยวยาว ~3-4 วัน + เผื่อ)
 BASE_NAME = "สินประดิษฐ์"  # สถานีฐานบริษัท
@@ -208,11 +208,15 @@ def gps2_streams():
 def main():
     token = os.environ["DTC_TOKEN"]
     now = datetime.now(timezone(timedelta(hours=7)))
-    blat, blon, brad = base_geometry(token)
     start = (now - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d 00:00:00")
     end = now.strftime("%Y-%m-%d %H:%M:%S")
-
-    vm = dtc_post("/getVehicleMaster", {"api_token_key": token})
+    # DTC ล่ม/ค้าง (หรือดึงสถานีฐานไม่ได้) → คง trips.json เดิมไว้ ไม่ล้ม workflow รอบหน้าค่อยคำนวณใหม่
+    try:
+        blat, blon, brad = base_geometry(token)
+        vm = dtc_post("/getVehicleMaster", {"api_token_key": token})
+    except (Exception, SystemExit) as e:
+        print(f"::warning title=trips skipped::{e!r:.160} — คง trips.json เดิมไว้")
+        return
     gid_by_num = {v["vehicle_name"].replace("70-", ""): v["gps_id"]
                   for v in vm.get("data", [])}
     ws = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")   # ขอบหน้าต่างสแกน
@@ -235,6 +239,10 @@ def main():
         cy = fuel_cycles(pts)
         if cy:
             cycles[num] = cy
+
+    if not dtc_available():              # DTC ล่มกลางทาง → ประวัติไม่ครบ อย่าเขียนทับของเดิม
+        print("::warning title=trips skipped::DTC ล่มระหว่างดึงประวัติ — คง trips.json เดิมไว้")
+        return
 
     # รถ GPS เจ้าที่ 2 (จากประวัติสะสมของเรา)
     for num, pts in gps2_streams().items():
