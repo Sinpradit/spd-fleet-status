@@ -684,7 +684,10 @@ def trip_start(num, key, wps, idx_out, fdate, prev_trips, history, home_ll):
         if t[:10] < d0:
             continue
         rw = route_waypoints(route)
-        if len(rw) < 2 or _norm(rw[0]) != w0 or _dest_id(rw[1]) != d1:
+        if not rw or _norm(rw[0]) != w0:
+            continue
+        # จุดที่วิ่งตอนยังลงแค่ลูกค้า (ยังไม่ลงปลายทาง) = เที่ยวเดียวกัน → นับด้วย (มาลงปลายทางทีหลังไม่ลืม)
+        if len(rw) >= 2 and _dest_id(rw[1]) != d1:
             continue
         zi = PROV_IDX.get(province_from_coords(la, lo))
         if zi is None or zi <= 1:              # โซนบ้าน (รวมไปรับของต้นทาง) ไม่นับ
@@ -987,8 +990,14 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         has_return = bool(route) and not route.rstrip().endswith("-") and not is_toy
         disp_dest = destination_of(route)        # what the app shows
         wps = route_waypoints(route)
+        # ลงแค่ชื่อลูกค้าขาไป (เช่น "ชัยวัฒนา-") = รับงานไปแล้ว ยังไม่ลงปลายทาง — จุดเดียวคือที่รับของ
+        # ไม่ใช่ปลายทาง (เดิมถือเป็นปลายทาง → ลูกค้าอยู่โซนบ้าน = "ถึงปลายทางแล้ว รอรับงานกลับ" ผิดฝั่ง)
+        dest_pending = len(wps) == 1 and not is_toy
+        if dest_pending:
+            has_return = False
         # outbound destination = 2nd waypoint (จุดที่ 2); fall back to 1st/last
-        out_name = wps[1] if len(wps) >= 2 else (wps[-1] if wps else None)
+        out_name = (None if dest_pending
+                    else wps[1] if len(wps) >= 2 else (wps[-1] if wps else None))
         idx_out = PROV_IDX.get(resolve_province(out_name)) if out_name else None
         # ไฟล์ทะเบียนคือความจริง: ช่องคนขับว่าง = ไม่มีคนขับ (ไม่ fallback รายคัน)
         driver = (drivers.get(num, "") if drivers is not None
@@ -1028,9 +1037,12 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                                    lat=None, lon=None, speed=None, heading=None, updated=None,
                                    from_file=True, stale=True, job_key=jk))
                 continue
-            cat = "find_outbound" if has_return else "find_return"
-            reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
-                      else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
+            if dest_pending:
+                cat, reason = "working", f"รับงาน {wps[0]} แล้ว กำลังจะออก — ยังไม่ลงปลายทาง (จากไฟล์)"
+            else:
+                cat = "find_outbound" if has_return else "find_return"
+                reason = ("ไฟล์มีงานกลับแล้ว → กลับถึงบ้าน ว่าง (จากไฟล์)" if has_return
+                          else "ไฟล์ลงท้าย - → ส่งของแล้ว รอรับกลับ (จากไฟล์)")
             trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat, leg=leg_of(cat, reason),
                                gps_status="ไม่มี GPS", province=None, district=None,
                                location_text="—", destination=disp_dest, reason=reason, lat=None,
@@ -1107,6 +1119,18 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 cat, reason = "find_return", "งานทอย มุ่งออก รอรับงานกลับ"
             else:
                 cat, reason = "find_outbound", "งานทอย มุ่งเข้าบ้าน ว่างรับงานไป"
+        elif dest_pending:
+            # ลงแค่ลูกค้าขาไป = งานไปที่ยังไม่ลงปลายทาง → ฝั่งกำลังไปเสมอ
+            # (ไม่รู้ปลายทาง = ตัดสิน "ถึงแล้ว/วกกลับ" ไม่ได้ · ลงปลายทางเมื่อไรก็กลับไปใช้ความจำเที่ยวตามปกติ)
+            cust = wps[0]
+            zi = idx_now if idx_now is not None else 5
+            if is_future:
+                cat, reason = "working", f"มีงาน {cust} รอออก ({' '.join(fdate.split()[:2])}) — ยังไม่ลงปลายทาง"
+            elif zi <= 1:
+                when = "" if is_recent or not fdate else f" (ลงงาน {' '.join(str(fdate).split()[:2])})"
+                cat, reason = "working", f"รับงาน {cust} แล้ว กำลังจะออก{when} — ยังไม่ลงปลายทาง"
+            else:
+                cat, reason = "working", f"กำลังไปส่ง (งาน {cust} — ยังไม่ลงปลายทาง)"
         elif idx_now is None or idx_out is None:
             # FALLBACK: map จังหวัดไม่ได้ → ใช้ logic โซนแบบเดิม (จุดนับ index 3)
             if unknown is not None and idx_out is None and out_name:
@@ -1188,7 +1212,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # --- ETA ต่อท้ายเหตุผล (ทุกคันใน 3 หมวดที่มีพิกัด รวมงานทอย) ---
         # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่น = ETA กลับถึงฐาน
         eta_h = None
-        if tlat and tlon and not dtc_stale:      # ตำแหน่งค้าง = ไม่รู้ระยะจริง → ไม่บอก ETA
+        # ตำแหน่งค้าง = ไม่รู้ระยะจริง · ยังไม่ลงปลายทาง = ไม่รู้จะไปไหน → ไม่บอก ETA (ไม่เดา "ถึงบ้าน")
+        if tlat and tlon and not dtc_stale and not dest_pending:
             def _eta_to(dlat, dlon):
                 """OSRM ก่อน; ล่มก็ประมาณจากระยะทางตรง (คูณแฟกเตอร์ถนน 1.3, 60 กม./ชม.)"""
                 h = osrm_eta_hours(tlat, tlon, dlat, dlon)

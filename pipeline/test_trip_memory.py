@@ -23,13 +23,13 @@ def check(name, cond, detail=""):
 
 
 def one(prov, pos, route, *, prev=None, heading=90, trips=None, history=None, date=TODAY,
-        num="9999", extra=None):
+        num="9999", extra=None, future=None):
     rec = {"truck_name": f"70-{num}", "province_th": prov, "district_th": "อ.",
            "lat": pos[0], "lon": pos[1], "heading": heading, "gps_speed": 0,
            "status_name_th": "รถจอด", "time": "2026-11-20 12:00:00", **(extra or {})}
     out = run.classify([], [rec], {num: {"route": route, "date": date}}, {TODAY}, set(), POIS,
                        roster=[num], drivers={num: "ทดสอบ"}, gps2=None,
-                       prev_pos={num: prev or pos}, future_dates=set(), manual_groups={},
+                       prev_pos={num: prev or pos}, future_dates=future or set(), manual_groups={},
                        prev_trips=trips or {}, history=history or {})
     return out[0]
 
@@ -124,6 +124,42 @@ check("แก้คำสะกด ยังจำว่าส่งที่ส
 t = one("สุพรรณบุรี", C["สุพรรณบุรี"], R_SUP, extra={"_stale": True, "_dtc_stale": True},
         trips={"9999": {"key": KEY, "max_km": 380, "reached": False, "seen": True}})
 check("ตำแหน่งค้างไม่ตั้ง reached", t["trip"]["reached"] is False and t["trip"]["max_km"] == 380, t["trip"])
+
+# 15) ลงแค่ชื่อลูกค้าขาไป "ชัยวัฒนา-" (ยังไม่ลงปลายทาง) = ฝั่งกำลังไป (2592/3604 20 พย)
+#     เดิม: จุดเดียวถูกถือเป็นปลายทาง + ลูกค้าเป็นสถานี DTC ในโซนบ้าน → "ถึงปลายทางแล้ว รอรับงานกลับ"
+UBN = C["อุบลราชธานี"]
+CUST = {"name": "ชัยวัฒนา เขื่องใน", "lat": UBN[0], "lon": UBN[1], "radius": 300, "poly": None}
+POIS[run._norm(CUST["name"])] = CUST
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-")
+check("ลงแค่ลูกค้า จอดที่ลูกค้า = ระหว่างงานไป (ไม่ใช่หางานกลับ)",
+      t["category"] == "working" and t["leg"] == "out" and "ยังไม่ลงปลายทาง" in t["reason"], t["reason"])
+check("ยังไม่ลงปลายทาง = ไม่เดา ETA / ไม่ตั้งความจำเที่ยว", t.get("eta_hours") is None and t["trip"] is None,
+      (t.get("eta_hours"), t["trip"]))
+t = one("ศรีสะเกษ", SSK, "ชัยวัฒนา-", prev=(15.2, 104.9), heading=60)
+check("ลงแค่ลูกค้า กำลังวิ่งไปรับของ = ระหว่างงานไป", t["category"] == "working" and t["leg"] == "out", t["reason"])
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-", date="22 พย 69", future={"22 พย 69"})
+check("ลงแค่ลูกค้า ล่วงหน้า = รอออก (ฝั่งไป)", t["leg"] == "out" and "รอออก" in t["reason"], t["reason"])
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-", date="17 พย 69")
+check("ลงแค่ลูกค้าไว้หลายวัน (รอโหลด) = ยังฝั่งไป + บอกวันลงงาน",
+      t["leg"] == "out" and "ลงงาน 17 พย" in t["reason"], t["reason"])
+t = one("สระบุรี", SAR, "ชัยวัฒนา-")
+check("ลงแค่ลูกค้า นอกโซนบ้าน = กำลังไปส่ง", t["leg"] == "out" and "กำลังไปส่ง" in t["reason"], t["reason"])
+out = run.classify([], [], {"9999": {"route": "ชัยวัฒนา-", "date": TODAY}}, {TODAY}, set(), POIS,
+                   roster=["9999"], drivers={"9999": "ทดสอบ"}, gps2=None, prev_pos={},
+                   future_dates=set(), manual_groups={}, prev_trips={}, history={})
+check("ลงแค่ลูกค้า ไม่มี GPS = ฝั่งไป (เดิม หางานกลับจากไฟล์)",
+      out[0]["category"] == "working" and out[0]["leg"] == "out", out[0]["reason"])
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-สมุทรสาคร-")
+check("ลงปลายทางแล้ว (ยังอยู่บ้าน) = แบบเดิม กำลังจะออก",
+      t["leg"] == "out" and "กำลังจะออก" in t["reason"] and "ยังไม่ลงปลายทาง" not in t["reason"], t["reason"])
+
+# 16) ลงแค่ลูกค้าแล้วรถออกไปก่อน → มาลงปลายทาง (+งานกลับ) ทีหลัง: จุดที่วิ่งช่วงยังไม่ลงปลายทางนับเป็นเที่ยวเดียวกัน
+#     (ไม่งั้นจอดพักรอบแรกหลังลงปลายทาง = default "ขนกลับ" ผิดฝั่ง)
+hist = {"9999": [("2026-11-19 20:00:00", "ชัยวัฒนา-", 14.95, 102.2)]}
+t = one("สระบุรี", SAR, "ชัยวัฒนา-สมุทรสาคร-ไทซิง-เมืองวัสดุ", heading=90, history=hist, date="19 พย 69")
+check("มาลงปลายทางทีหลัง ความจำช่วงลงแค่ลูกค้ายังใช้ได้ = ยังไปส่ง",
+      t["leg"] == "out" and t["trip"]["seen"] and not t["trip"]["reached"], (t["reason"], t["trip"]))
+del POIS[run._norm(CUST["name"])]
 
 print("\nALL PASS" if not fails else f"\n{len(fails)} FAIL: {fails}")
 sys.exit(1 if fails else 0)
