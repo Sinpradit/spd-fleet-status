@@ -631,11 +631,16 @@ def thai_date_iso(s):
         return None
 
 
+def _dest_id(name):
+    """ปลายทาง → รหัสเทียบเที่ยว: จังหวัดถ้ารู้ (ทนแก้คำสะกด เช่น ยูนิวเอร์แซล→ยูนิเวอร์แซล) ไม่รู้ = ชื่อ"""
+    return resolve_province(name) or _norm(name)
+
+
 def trip_key(wps, fdate):
     """ลายนิ้วมือเที่ยว = ต้นทาง>ปลายทางขาไป|วันลงงาน (มาเติมงานกลับต่อท้ายทีหลัง = เที่ยวเดิม)"""
     if len(wps) < 2 or not fdate:
         return None
-    return f"{_norm(wps[0])}>{_norm(wps[1])}|{str(fdate).strip()}"
+    return f"{_norm(wps[0])}>{_dest_id(wps[1])}|{str(fdate).strip()}"
 
 
 def load_route_history(now, days=10, path="route-track.jsonl"):
@@ -673,12 +678,12 @@ def trip_start(num, key, wps, idx_out, fdate, prev_trips, history, home_ll):
     d0 = thai_date_iso(fdate)
     if not d0:
         return st
-    w0, w1 = _norm(wps[0]), _norm(wps[1])
+    w0, d1 = _norm(wps[0]), _dest_id(wps[1])
     for t, route, la, lo in (history or {}).get(num, []):
         if t[:10] < d0:
             continue
         rw = route_waypoints(route)
-        if len(rw) < 2 or _norm(rw[0]) != w0 or _norm(rw[1]) != w1:
+        if len(rw) < 2 or _norm(rw[0]) != w0 or _dest_id(rw[1]) != d1:
             continue
         zi = PROV_IDX.get(province_from_coords(la, lo))
         if zi is None or zi <= 1:              # โซนบ้าน (รวมไปรับของต้นทาง) ไม่นับ
