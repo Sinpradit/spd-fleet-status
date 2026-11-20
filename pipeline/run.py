@@ -610,9 +610,41 @@ def prev_tracks_today(now):
     return {"generated_at": now.isoformat(), "date": today, "tracks": tracks}
 
 
-def _gps_lost_suffix(rt):
-    hhmm = (rt.get("time") or "")[11:16]
-    return f" · GPS ขาด (ตำแหน่งล่าสุด {hhmm})" if hhmm else " · GPS ขาด"
+# กล่อง GPS ไม่ส่งตำแหน่งใหม่เกินนี้ = "GPS ขาด" (เช่น ถอดไฟ/ใช้ไฟสำรอง — 3066 ค้างที่โคราช 25+ ชม.)
+# ข้อมูลจริง 100 รอบ: ปกติตำแหน่งใหม่ทุก 2–5 นาที · GPS เจ้าที่ 2 ~30 นาที → 1 ชม. ไม่ติดคันปกติ
+# รถจอดไม่มีคนขับไม่นับ (กล่องหลับเองตอนจอดนาน เช่น 1286 ส่งทุก 6–22 ชม.)
+GPS_LOST_H = 1
+_TH_MON_ABBR = ("", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+
+
+def _gps_time(rt):
+    """เวลาตำแหน่งล่าสุดของรถ (เวลาไทย ไม่มี tz — DTC และ GPS เจ้าที่ 2 ใช้รูปแบบเดียวกัน) · อ่านไม่ได้ = None"""
+    s = str((rt or {}).get("time") or "")[:19].replace("T", " ")
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def gps_age_hours(rt, now):
+    """ตำแหน่งเก่ากี่ชั่วโมงเทียบเวลารอบนี้ · ไม่รู้เวลา/ไม่ส่ง now = None"""
+    t = _gps_time(rt)
+    if t is None or now is None:
+        return None
+    return (now.replace(tzinfo=None) - t).total_seconds() / 3600
+
+
+def _gps_lost_suffix(rt, now=None):
+    """ " · GPS ขาด (ตำแหน่งล่าสุด 13:21)" · ข้ามวัน = "(ตำแหน่งล่าสุด 19 พ.ย. 13:21)" """
+    t = _gps_time(rt)
+    if t is None:
+        hhmm = str(rt.get("time") or "")[11:16]
+        return f" · GPS ขาด (ตำแหน่งล่าสุด {hhmm})" if hhmm else " · GPS ขาด"
+    when = t.strftime("%H:%M")
+    if now is not None and t.date() != now.replace(tzinfo=None).date():
+        when = f"{t.day} {_TH_MON_ABBR[t.month]} {when}"
+    return f" · GPS ขาด (ตำแหน่งล่าสุด {when})"
 
 
 # ---------- ความจำต่อเที่ยว: ถึงปลายทางขาไปแล้วหรือยัง ----------
@@ -958,7 +990,7 @@ def route_waypoints(route):
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
              roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None,
-             manual_groups=None, prev_trips=None, history=None):
+             manual_groups=None, prev_trips=None, history=None, now=None):
     pois = pois or {}
     future_dates = future_dates or set()
     prev_pos = prev_pos or {}
@@ -1016,13 +1048,15 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 except (TypeError, ValueError):
                     at_p = None
             reason = "ไม่มีคนขับ — รถจอด" + (f" · 📍{at_p}" if at_p else "")
-            if rt is not None and rt.get("_dtc_stale"):
-                reason += _gps_lost_suffix(rt)
+            p_lost = bool(rt is not None and rt.get("_dtc_stale"))   # จอดนานกล่องหลับเอง ≠ GPS ขาด
+            if p_lost:
+                reason += _gps_lost_suffix(rt, now)
             loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
             trucks.append(dict(number=num, driver="", group=group, group_src=gsrc, category="parked",
                                gps_status="รถจอด", province=prov, district=dist,
                                location_text=loc, destination=disp_dest, reason=reason,
                                lat=la, lon=lo, speed=spd, heading=None, updated=upd,
+                               gps_lost=p_lost,
                                from_file=rt is None, stale=bool(rt and rt.get("_stale")),
                                at_station=at_p,
                                eta_hours=None, fuel=fu, off_route=False, job_key=jk))
@@ -1054,7 +1088,10 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         idx_now = PROV_IDX.get(prov)
         if idx_now is None and prov and prov != "-" and unknown is not None:
             unknown.add(f"จังหวัดปัจจุบัน:{prov}")   # ไม่มีในตารางโซน → ตกไปเดาจากโซน (ควรเพิ่ม)
-        dtc_stale = bool(rt.get("_dtc_stale"))   # DTC ล่ม: ตำแหน่งล่าสุดจากรอบก่อน (ไม่รู้ว่าตอนนี้รถอยู่ไหน)
+        # GPS ขาด = ไม่รู้ว่าตอนนี้รถอยู่ไหน: DTC ล่ม (ตำแหน่งจากรอบก่อน) หรือกล่อง GPS ไม่ส่งตำแหน่งใหม่เกิน GPS_LOST_H
+        # → ไม่คิด ETA/นอกเส้นทาง · ไม่เอาตำแหน่งค้างมาอัปเดตความจำเที่ยว · หมวดคงตามตำแหน่งล่าสุด
+        _age = gps_age_hours(rt, now)
+        gps_lost = bool(rt.get("_dtc_stale")) or (_age is not None and _age > GPS_LOST_H)
         try:
             heading = float(rt.get("heading")) if rt.get("heading") is not None else None
         except (TypeError, ValueError):
@@ -1093,7 +1130,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # --- ความจำเที่ยว (งานไป/ไป-กลับ ไม่ใช่ทอย): ถึงปลายทาง/วกกลับแล้ว = ขากลับจนจบเที่ยว ---
         tkey = None if is_toy else trip_key(wps, fdate)
         st = trip_start(num, tkey, wps, idx_out, fdate, prev_trips, history, home_ll) if tkey else None
-        if st is not None and not dtc_stale:     # ตำแหน่งค้าง (DTC ล่ม) ไม่ใช่หลักฐานใหม่
+        if st is not None and not gps_lost:      # ตำแหน่งค้าง (DTC ล่ม/GPS ขาด) ไม่ใช่หลักฐานใหม่
             if at_dest:
                 st["reached"] = True
             if tlat and tlon and idx_now is not None and idx_now >= 2:   # นอกโซนบ้านเท่านั้น
@@ -1213,7 +1250,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # กำลังไปส่ง = ETA ถึงสถานีปลายทาง · คันอื่น = ETA กลับถึงฐาน
         eta_h = None
         # ตำแหน่งค้าง = ไม่รู้ระยะจริง · ยังไม่ลงปลายทาง = ไม่รู้จะไปไหน → ไม่บอก ETA (ไม่เดา "ถึงบ้าน")
-        if tlat and tlon and not dtc_stale and not dest_pending:
+        if tlat and tlon and not gps_lost and not dest_pending:
             def _eta_to(dlat, dlon):
                 """OSRM ก่อน; ล่มก็ประมาณจากระยะทางตรง (คูณแฟกเตอร์ถนน 1.3, 60 กม./ชม.)"""
                 h = osrm_eta_hours(tlat, tlon, dlat, dlon)
@@ -1297,7 +1334,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         # --- เฟส 4: ตรวจนอกเส้นทาง (เฉพาะช่วงกำลังวิ่งไปส่ง และไม่ได้อยู่ในสถานีบริษัท) ---
         off = None
         if (cat == "working" and tlat and tlon and not is_toy and not at_st
-                and not dtc_stale and "กำลังไปส่ง" in reason):
+                and not gps_lost and "กำลังไปส่ง" in reason):
             dest_prov = resolve_province(out_name) if out_name else None
             off = off_route_check(tlat, tlon, prov, dest_prov,
                                   pois.get(_norm(HOME_POI)), dest_poi)
@@ -1311,17 +1348,18 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         is_gps2 = bool(rt.get("_gps2"))
         if is_gps2:
             reason += " · GPS เจ้าที่ 2"
-            if rt.get("_stale"):
+            if rt.get("_stale") and not gps_lost:     # GPS ขาด บอกเวลาในป้ายท้ายแล้ว ไม่ซ้ำ
                 reason += f" (ข้อมูลเมื่อ {(rt.get('time') or '')[11:16]})"
-        if dtc_stale:
-            reason += _gps_lost_suffix(rt)
+        if gps_lost:
+            reason += _gps_lost_suffix(rt, now)
         loc = f"{prov} · {dist}" if prov and dist else (prov or "—")
         trucks.append(dict(number=num, driver=driver, group=group, group_src=gsrc, category=cat, leg=leg_of(cat, reason),
                            gps_status=rt.get("status_name_th") or "", province=prov,
                            district=dist, location_text=loc, destination=disp_dest, reason=reason,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
                            heading=heading, updated=rt.get("time"), from_file=False,
-                           stale=bool(rt.get("_stale")),
+                           gps_lost=gps_lost,
+                           stale=bool(rt.get("_stale")) or gps_lost,
                            trip=({**st, "max_km": round(st["max_km"], 1)} if st else None),
                            at_station=at_st,
                            eta_hours=(round(eta_h, 1) if eta_h is not None else None),
@@ -1395,7 +1433,7 @@ def main():
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
                       roster, drivers, gps2, prev_pos, future_dates, manual_groups,
-                      prev_trips, history)
+                      prev_trips, history, now=now)
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:

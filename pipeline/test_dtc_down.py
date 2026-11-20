@@ -90,8 +90,10 @@ FUEL = {"3637": {"route": "เจียเม้ง-นนทบุรี-", "da
         "4200": {"route": "ทอย ชัยวัฒนา-เจียเม้ง (60)", "date": TODAY_TH}}
 ROSTER = ["1268", "3637", "4100", "4200"]
 DRIVERS = {"3637": "สอ", "4100": "เล่", "4200": "ตั้ม"}           # 1268 ไม่มีคนขับ = รถจอด
+# เวลา GPS2 อิงนาฬิกาจริง (main ใช้เวลาจริง + ตรวจ GPS ขาดเมื่อตำแหน่งเก่าเกิน 1 ชม.) → ของสด 10 นาที
+GPS2_TIME = (NOW - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
 GPS2 = {"4100": {"truck_name": "70-4100", "lat": 14.60, "lon": 101.00, "gps_speed": 60,
-                 "heading": 90, "time": "2026-11-18 17:20:00", "province_th": "สระบุรี",
+                 "heading": 90, "time": GPS2_TIME, "province_th": "สระบุรี",
                  "district_th": None, "status_name_th": "รถวิ่ง", "_gps2": True,
                  "_fuel": 80, "_stale": False}}
 
@@ -161,6 +163,9 @@ check("dtc_last_ok = รอบสุดท้ายที่ DTC ปกติ", 
 m = by_num(run._iter_trucks(doc))
 check("ผลรอบใหม่: 3637 ป้าย GPS ขาด", "GPS ขาด" in m["3637"]["reason"], m["3637"]["reason"])
 check("ผลรอบใหม่: 4100 ตำแหน่งสด", m["4100"]["lat"] == 14.60, m["4100"])
+check("ผลรอบใหม่: ตำแหน่งค้าง = gps_lost, GPS2 สด = ไม่ติด",
+      m["3637"].get("gps_lost") is True and m["4100"].get("gps_lost") is False,
+      (m["3637"].get("gps_lost"), m["4100"].get("gps_lost")))
 with open("tracks.json", encoding="utf-8") as f:
     tr = json.load(f)
 check("เส้นทางวันนี้ของรถ DTC คงเดิม", tr["tracks"].get("3637") == OLD_TRACKS["3637"], tr["tracks"].get("3637"))
