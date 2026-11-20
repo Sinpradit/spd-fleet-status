@@ -51,6 +51,7 @@ PROV_CENTROIDS = {
     "กรุงเทพมหานคร": (13.75, 100.50), "จันทบุรี": (12.61, 102.10),
     "สมุทรปราการ": (13.60, 100.60), "นครปฐม": (13.82, 100.06),
     "สมุทรสาคร": (13.55, 100.27), "ตราด": (12.24, 102.51),
+    "อ่างทอง": (14.59, 100.45), "มหาสารคาม": (16.18, 103.30),
     "กาญจนบุรี": (14.02, 99.53),
 }
 
@@ -140,6 +141,8 @@ PROV_IDX = {
     "ชลบุรี": 6, "นนทบุรี": 7, "ระยอง": 7, "สุพรรณบุรี": 8, "กรุงเทพมหานคร": 8,
     "จันทบุรี": 8, "สมุทรปราการ": 9, "นครปฐม": 9, "สมุทรสาคร": 9, "ตราด": 9,
     "กาญจนบุรี": 9,
+    # รถวิ่งผ่านจริงแต่เดิมไม่มีในตาราง (20 พย 69) → เดิมตกโซนไกล "เลยจุดนับ" ทั้งที่ยังขาไป
+    "มหาสารคาม": 1, "อ่างทอง": 6,
 }
 HOME = {"ศรีสะเกษ", "อุบลราชธานี", "สุรินทร์"}
 
@@ -186,6 +189,7 @@ PLACE_DB = {
     "โนนคูณ": "ศรีสะเกษ", "พิบูล": "อุบลราชธานี", "บกด หนองแค": "สระบุรี",
     "ซีแพ็คหนองแค": "สระบุรี", "หนองแค": "สระบุรี", "นอร์ทอีส": "สระบุรี",
     "เตียเหลียง": "อุบลราชธานี", "ดูโฮม": "พระนครศรีอยุธยา",
+    # ชื่อที่ตรงกับสถานีใน DTC ไม่ต้องเพิ่มที่นี่ — classify ใช้พิกัดสถานีบอกจังหวัดเอง
     # known districts -> province
     "หน้าพระลาน": "สระบุรี", "เขื่องใน": "อุบลราชธานี", "บางกรวย": "นนทบุรี",
     "บางบัวทอง": "นนทบุรี", "บางปะหัน": "พระนครศรีอยุธยา", "พระประแดง": "สมุทรปราการ",
@@ -194,6 +198,7 @@ PLACE_DB = {
     # common spelling variants seen in the fuel file
     "สมุทรปรากร": "สมุทรปราการ", "สมุทปราการ": "สมุทรปราการ",
     "สมุทรปราการ": "สมุทรปราการ", "อยุธยา": "พระนครศรีอยุธยา",
+    "ยูนิวเอร์แซล": "สมุทรสาคร",
 }
 _RESOLVE = {**PLACE_DB, **{k.lower(): v for k, v in PLACE_DB.items()},
             **PROVINCE_ALIASES}
@@ -609,6 +614,83 @@ def _gps_lost_suffix(rt):
     return f" · GPS ขาด (ตำแหน่งล่าสุด {hhmm})" if hhmm else " · GPS ขาด"
 
 
+# ---------- ความจำต่อเที่ยว: ถึงปลายทางขาไปแล้วหรือยัง ----------
+# เดิมตัดสินไป/กลับจากการขยับใน 15 นาที + เข็มทิศ → รถจอด/รถติด/ถนนโค้ง = ไป/กลับสลับไปมา
+# ตอนนี้จำต่อเที่ยว (เก็บใน fleet-status.json ช่อง trip): ถึงปลายทาง/วกกลับแล้ว = ขากลับจนจบเที่ยว
+BASE_LATLON = (15.0990, 104.5748)   # สถานีฐานสินประดิษฐ์ (สำรองตอนดึง POI ไม่ได้)
+TURNBACK_KM = 25                    # ห่างบ้านลดจากจุดไกลสุดของเที่ยว (นอกโซนบ้าน) เกินนี้ = วกกลับแล้ว
+
+
+def thai_date_iso(s):
+    """'18 พย 69' -> '2026-11-18' · อ่านไม่ได้ = None"""
+    try:
+        d, m, y = str(s).split()[:3]
+        mon = next(k for k, v in THAI_MONTH.items() if v == m)
+        return f"{1957 + int(y):04d}-{mon:02d}-{int(d):02d}"
+    except Exception:
+        return None
+
+
+def trip_key(wps, fdate):
+    """ลายนิ้วมือเที่ยว = ต้นทาง>ปลายทางขาไป|วันลงงาน (มาเติมงานกลับต่อท้ายทีหลัง = เที่ยวเดิม)"""
+    if len(wps) < 2 or not fdate:
+        return None
+    return f"{_norm(wps[0])}>{_norm(wps[1])}|{str(fdate).strip()}"
+
+
+def load_route_history(now, days=10, path="route-track.jsonl"):
+    """จุด GPS ที่สะสมไว้ (route-track.jsonl) ย้อนหลัง ~10 วัน -> {เลขรถ: [(เวลา, เส้นทาง, lat, lon)]}
+    ใช้ตั้งความจำเที่ยวตอนรอบก่อนยังไม่มี (เพิ่งเปิดใช้ / ข้อมูลรอบก่อนหาย)"""
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                t = str(r.get("t") or "")
+                if t[:10] < since or not r.get("la") or not r.get("lo"):
+                    continue
+                out.setdefault(str(r.get("n")), []).append((t, r.get("r") or "", r["la"], r["lo"]))
+    except FileNotFoundError:
+        pass
+    for pts in out.values():
+        pts.sort()
+    return out
+
+
+def trip_start(num, key, wps, idx_out, fdate, prev_trips, history, home_ll):
+    """สถานะเที่ยวตอนเริ่มรอบนี้: จากรอบก่อน (key เดียวกัน) หรือตั้งจากประวัติจุด GPS ของงานนี้
+    -> {key, max_km: ไกลบ้านสุดของเที่ยว (นอกโซนบ้าน), reached: ถึงปลายทาง/วกกลับแล้ว,
+        seen: เคยเห็นเที่ยวนี้วิ่งจริงแล้ว (ใช้ความจำตัดสินได้)}"""
+    p = (prev_trips or {}).get(num)
+    if p and p.get("key") == key:
+        return {"key": key, "max_km": float(p.get("max_km") or 0),
+                "reached": bool(p.get("reached")), "seen": bool(p.get("seen"))}
+    st = {"key": key, "max_km": 0.0, "reached": False, "seen": False}
+    d0 = thai_date_iso(fdate)
+    if not d0:
+        return st
+    w0, w1 = _norm(wps[0]), _norm(wps[1])
+    for t, route, la, lo in (history or {}).get(num, []):
+        if t[:10] < d0:
+            continue
+        rw = route_waypoints(route)
+        if len(rw) < 2 or _norm(rw[0]) != w0 or _norm(rw[1]) != w1:
+            continue
+        zi = PROV_IDX.get(province_from_coords(la, lo))
+        if zi is None or zi <= 1:              # โซนบ้าน (รวมไปรับของต้นทาง) ไม่นับ
+            continue
+        km = _haversine_m(home_ll[0], home_ll[1], la, lo) / 1000
+        if (idx_out is not None and zi >= idx_out) or st["max_km"] - km >= TURNBACK_KM:
+            st["reached"] = True
+        st["max_km"] = max(st["max_km"], km)
+        st["seen"] = True
+    return st
+
+
 def drive_service(sa_json):
     info = json.loads(sa_json.lstrip("﻿").strip())
     creds = service_account.Credentials.from_service_account_info(
@@ -867,11 +949,13 @@ def route_waypoints(route):
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
              roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None,
-             manual_groups=None):
+             manual_groups=None, prev_trips=None, history=None):
     pois = pois or {}
     future_dates = future_dates or set()
     prev_pos = prev_pos or {}
     home_st = pois.get(_norm(HOME_POI))
+    home_ll = ((home_st["lat"], home_st["lon"]) if home_st and home_st.get("lat")
+               else BASE_LATLON)
     num_by_gps = {v["gps_id"]: v["vehicle_name"].replace("70-", "") for v in vehicles}
     rt_by_num = {}
     for r in realtime:
@@ -950,6 +1034,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
 
         prov, dist = rt.get("province_th"), rt.get("district_th")
         idx_now = PROV_IDX.get(prov)
+        if idx_now is None and prov and prov != "-" and unknown is not None:
+            unknown.add(f"จังหวัดปัจจุบัน:{prov}")   # ไม่มีในตารางโซน → ตกไปเดาจากโซน (ควรเพิ่ม)
         dtc_stale = bool(rt.get("_dtc_stale"))   # DTC ล่ม: ตำแหน่งล่าสุดจากรอบก่อน (ไม่รู้ว่าตอนนี้รถอยู่ไหน)
         try:
             heading = float(rt.get("heading")) if rt.get("heading") is not None else None
@@ -981,10 +1067,33 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         at_st = station_of(tlat, tlon, pois) if (tlat and tlon) else None
         dest_poi = match_dest_poi(out_name, pois) if not is_toy else None
         at_dest = bool(at_st and dest_poi and _norm(at_st) == _norm(dest_poi["name"]))
+        # ปลายทางไม่มีในตารางชื่อ แต่ตรงกับสถานีใน DTC → ใช้พิกัดสถานีบอกจังหวัด
+        # (เจ้าของเพิ่มสถานีใน DTC = ระบบรู้จักปลายทางนั้นเอง ไม่ต้องแก้โค้ด)
+        if idx_out is None and dest_poi and dest_poi.get("lat"):
+            idx_out = PROV_IDX.get(province_from_coords(dest_poi["lat"], dest_poi["lon"]))
+
+        # --- ความจำเที่ยว (งานไป/ไป-กลับ ไม่ใช่ทอย): ถึงปลายทาง/วกกลับแล้ว = ขากลับจนจบเที่ยว ---
+        tkey = None if is_toy else trip_key(wps, fdate)
+        st = trip_start(num, tkey, wps, idx_out, fdate, prev_trips, history, home_ll) if tkey else None
+        if st is not None and not dtc_stale:     # ตำแหน่งค้าง (DTC ล่ม) ไม่ใช่หลักฐานใหม่
+            if at_dest:
+                st["reached"] = True
+            if tlat and tlon and idx_now is not None and idx_now >= 2:   # นอกโซนบ้านเท่านั้น
+                km = _haversine_m(home_ll[0], home_ll[1], tlat, tlon) / 1000
+                if ((idx_out is not None and idx_now >= idx_out) or mv == "home"
+                        or st["max_km"] - km >= TURNBACK_KM):
+                    st["reached"] = True
+                st["max_km"] = max(st["max_km"], km)
+                if mv in ("out", "home"):        # เห็นวิ่งจริง (ไม่ใช่จอดนิ่งรอบแรก)
+                    st["seen"] = True
+            if st["reached"]:
+                st["seen"] = True
+        reached = bool(st and st["reached"])
+        known = bool(st and st["seen"])
 
         if is_toy:                               # งานทอย — ใช้ตำแหน่ง GPS ล้วน
             zi = idx_now if idx_now is not None else 5
-            if prov in HOME:
+            if prov in HOME or zi <= 1:          # โซนบ้าน (รวมอำนาจเจริญ/ยโสธร/ร้อยเอ็ด) ไม่ใช้เข็มทิศ
                 cat, reason = "find_outbound", "งานทอย อยู่โซนบ้าน ว่างรับงานไป"
             elif zi >= 3:
                 cat, reason = "find_return", "งานทอย อยู่โซนกลาง/ตะวันออก รอรับงานกลับ"
@@ -1000,20 +1109,28 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             if not has_return:
                 if zi >= COUNT:
                     cat, reason = "find_return", "เลยจุดนับขาไป รอรับงานกลับ (ประเมินจากโซน)"
+                elif zi <= 1 and reached:        # ส่งของแล้ววนกลับถึงบ้าน (ยังไม่มีงานกลับ)
+                    cat, reason = "find_outbound", "ส่งของแล้ว กลับถึงบ้าน ว่าง (ประเมินจากโซน)"
                 elif zi <= 1 and is_future:      # งานลงล่วงหน้า = จองแล้ว รอออก
                     cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                 elif zi <= 1 and not is_recent:
                     cat, reason = "find_outbound", "อยู่บ้าน งานเก่า → ว่าง (ประเมินจากโซน)"
+                elif reached:                    # วกกลับแล้ว ยังไม่มีงานกลับ
+                    cat, reason = "find_return", "ส่งของแล้ว รอรับงานกลับ (ประเมินจากโซน)"
                 else:
                     cat, reason = "working", "กำลังไปส่ง (ประเมินจากโซน)"
             else:
                 if zi <= 1:
-                    if is_recent and head_out:
+                    if reached:                  # ไปส่งแล้ววนกลับถึงบ้าน = จบเที่ยว
+                        cat, reason = "find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"
+                    elif is_recent and head_out:
                         cat, reason = "working", "เพิ่งออกงาน (ประเมินจากโซน)"
                     elif is_future:              # งานลงล่วงหน้า = จองแล้ว รอออก
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                     else:
                         cat, reason = "find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"
+                elif known and not reached:      # เห็นเที่ยวนี้วิ่งมาแล้ว ยังไม่วกกลับ = ยังไปส่ง
+                    cat, reason = "working", "กำลังไปส่ง (ประเมินจากโซน)"
                 else:
                     cat, reason = "working", "กำลังขนกลับ (ประเมินจากโซน)"
         else:
@@ -1024,35 +1141,41 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 elif idx_now >= idx_out:
                     cat, reason = "find_return", f"ถึงปลายทางขาไป ({out_name}) แล้ว ส่งของแล้ว รอรับงานกลับ"
                 elif idx_now <= 1:
-                    if is_future:
+                    if reached:                   # ส่งของแล้ววนกลับถึงบ้าน (ยังไม่มีงานกลับ)
+                        cat, reason = "find_outbound", "ส่งของแล้ว กลับถึงบ้าน ว่างพร้อมรับงานไป"
+                    elif is_future:
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                     elif is_recent:
                         cat, reason = "working", "รับงานขาไปแล้ว กำลังจะออก"
                     else:
                         cat, reason = "find_outbound", "ว่าง พร้อมรับงานไป"
+                elif reached:                     # ส่งแล้ว กำลังวิ่งกลับเปล่า = ต้องหางานกลับ
+                    cat, reason = "find_return", f"ส่งของที่ {out_name} แล้ว รอรับงานกลับ"
                 else:
                     cat, reason = "working", f"กำลังไปส่ง — ถึง {prov} แล้ว ยังไม่ถึง {out_name}"
             else:                                 # มีงานกลับครบเที่ยว
                 if at_dest:
                     cat, reason = "working", f"อยู่ที่ {at_st} — ส่งของ (มีงานกลับต่อ)"
                 elif idx_now <= 1:                # โซนบ้าน
-                    if is_recent and (mv == "out" or head_out):
+                    if reached:                   # ไปส่งแล้ววนกลับถึงบ้าน = จบเที่ยว (ไม่ใช่ "เพิ่งออกงาน")
+                        cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
+                    elif is_recent and (mv == "out" or head_out):
                         cat, reason = "working", f"เพิ่งออกงาน กำลังไปส่ง ({out_name})"
                     elif is_future:
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
                     else:
                         cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
-                elif mv == "home":
-                    # มุ่งเข้าบ้านชัดเจน = ขนกลับ (ไม่ว่างานเก่า/ใหม่) — ตัดสินก่อนใคร
+                elif reached or mv == "home":
+                    # ถึงปลายทาง/วกกลับแล้ว (จำต่อเที่ยว) หรือมุ่งเข้าบ้านชัดเจน = ขากลับ — จอดพักก็ไม่สลับ
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
-                elif (idx_out is not None and idx_now < idx_out
-                      and (mv == "out" or head_out)):
-                    # POSITION-PRIMARY: ยังไม่ถึงปลายทางขาไป + มีสัญญาณวิ่งออก = ยังไปส่ง
-                    # (ไม่ผูก is_recent แล้ว → งานเก่าที่ยังวิ่งขาไปจริงก็จับได้)
+                elif known or (idx_out is not None and idx_now < idx_out
+                               and (mv == "out" or head_out)):
+                    # เห็นเที่ยวนี้วิ่งมาแล้วแต่ยังไม่ถึงปลายทาง = ยังไปส่ง (จอดพัก/รถติด/ถนนโค้งไม่สลับ)
+                    # หรือยังไม่มีความจำ + สัญญาณวิ่งออก (POSITION-PRIMARY แบบเดิม)
                     cat, reason = "working", f"กำลังไปส่ง ({out_name})"
                 else:
-                    # ไม่ชัด (ไม่ขยับ) หรือเลยปลายทางแล้ว = ขนกลับ (default ปลอดภัย)
+                    # ยังไม่มีความจำเที่ยวนี้ + ไม่ขยับ = ขนกลับไว้ก่อน (default ปลอดภัยแบบเดิม)
                     near = " ใกล้ถึงบ้าน" if idx_now == 2 else ""
                     cat, reason = "working", "กำลังขนกลับ" + near
 
@@ -1087,8 +1210,11 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 e = fmt_eta(eta_h)
                 if e:
                     reason += f" · อีก {e} ถึง {dest_label}"
-            elif cat == "find_return":
+            elif cat == "find_return" and not (
+                    reached and not at_dest
+                    and not (idx_now is not None and idx_out is not None and idx_now >= idx_out)):
                 eta_h = 0.0        # ถึงปลายทางแล้ว จอดรอรับงานกลับ — ไม่คำนวณ ETA กลับบ้านให้สับสน
+                # (ส่งแล้ววิ่งกลับเปล่าระหว่างทาง → ไปตกเงื่อนไขท้ายสุด: ETA กลับบ้าน)
             elif cat == "working" and has_return and wps:
                 # ขากลับ → ETA ถึง "ปลายทางสุดท้ายที่เขียนในไฟล์น้ำมัน" (ไม่ใช่บ้านลอย ๆ)
                 fname = wps[-1]
@@ -1165,6 +1291,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                            lat=rt.get("lat"), lon=rt.get("lon"), speed=rt.get("gps_speed"),
                            heading=heading, updated=rt.get("time"), from_file=False,
                            stale=bool(rt.get("_stale")),
+                           trip=({**st, "max_km": round(st["max_km"], 1)} if st else None),
                            at_station=at_st,
                            eta_hours=(round(eta_h, 1) if eta_h is not None else None),
                            fuel=rt.get("_fuel"), off_route=bool(off), job_key=jk))
@@ -1227,6 +1354,8 @@ def main():
         pass
     prev_pos = {t["number"]: (t["lat"], t["lon"]) for t in _iter_trucks(prev_doc)
                 if t.get("lat") and t.get("lon")}
+    prev_trips = {t["number"]: t["trip"] for t in _iter_trucks(prev_doc) if t.get("trip")}
+    history = load_route_history(now)        # ตั้งความจำเที่ยวที่รอบก่อนยังไม่มี
     if not dtc_ok:
         realtime = stale_realtime(prev_doc)
     if not pois:                             # ดึงสถานีจาก DTC ไม่ได้ → สถานีที่รถเคยอยู่ในรอบก่อน
@@ -1234,7 +1363,8 @@ def main():
         print(f"WARN: DTC POIs unavailable -> {len(pois)} stations from previous run")
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
-                      roster, drivers, gps2, prev_pos, future_dates, manual_groups)
+                      roster, drivers, gps2, prev_pos, future_dates, manual_groups,
+                      prev_trips, history)
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:
@@ -1350,7 +1480,7 @@ def main():
           f"realtime={len(realtime)} trucks={len(trucks)} roster={src} pois={len(pois)} "
           f"at_station={n_st} eta={n_eta} summary={doc['summary']}")
     if unknown:
-        print("UNKNOWN destinations (fell back to zone logic):", ", ".join(sorted(unknown)))
+        print("UNKNOWN places (fell back to zone logic):", ", ".join(sorted(unknown)))
 
 
 if __name__ == "__main__":
