@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-24T10:05:01.401436+07:00",
+ "generated_at": "2026-11-24T10:19:58.776333+07:00",
  "jobs": [
   {
    "id": "tk95nghk2pgdrg54pii4kdd5r0",
@@ -8,6 +8,14 @@
    "destination": "เฮียเหลา",
    "count": 1,
    "title": "เจียเม้ง 1-เฮียเหลา"
+  },
+  {
+   "id": "pvmrrcsmapek1d84dsph7ub040",
+   "date": "2026-11-28",
+   "customer": "เตียเหลียง",
+   "destination": "แหลมฉบัง",
+   "count": 2,
+   "title": "เตียเหลียง2-แหลมฉบัง"
   },
   {
    "id": "cna85oloabnrs5h3ocqrqb8if4",
