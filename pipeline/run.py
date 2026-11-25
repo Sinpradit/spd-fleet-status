@@ -563,6 +563,49 @@ def _iter_trucks(doc):
             yield from g.get("trucks", [])
 
 
+# ---------- ตัวจับผิด: สถานะเปลี่ยนทั้งที่รถไม่ขยับ + งาน/คนขับเดิม ----------
+# แปลว่ากติกาตัดสินจากเวลา/เข็มทิศล้วน ซึ่งมักผิด (1300 ไป → หาไป ตอนเที่ยงคืน 25 พย เพราะวันที่ลงงานหลุดช่วง)
+# รอบแรกหลัง deploy โค้ดใหม่ก็จะเตือนคันที่เปลี่ยนเพราะโค้ด = ใช้ตรวจว่าเปลี่ยนเฉพาะคันที่ตั้งใจ
+FLIP_MOVE_M = 500        # ขยับไม่ถึงนี้ระหว่าง 2 รอบ (~15 นาที) = ไม่ได้ขยับ (GPS แกว่งตอนจอด < 100 ม.)
+
+
+def _side(t):
+    """ฝั่งที่แอปโชว์: หางานไป/หางานกลับ/รถจอด/ระหว่างงานไป/ระหว่างงานกลับ"""
+    c = t.get("category")
+    if c == "working":
+        return {"out": "ระหว่างงานไป", "back": "ระหว่างงานกลับ"}.get(t.get("leg"), "ระหว่างงาน (ไม่ทราบทิศ)")
+    return CAT_LABEL.get(c, c or "?")
+
+
+def detect_flips(prev_doc, trucks, now):
+    """คันที่ฝั่งเปลี่ยนจากรอบก่อน ทั้งที่ ตำแหน่งแทบเดิม + งานในไฟล์น้ำมันเดิม + คนขับเดิม -> [alert]"""
+    prev = {t.get("number"): t for t in _iter_trucks(prev_doc)}
+    out = []
+    for t in trucks:
+        p = prev.get(t.get("number"))
+        if not p:
+            continue
+        a, b = _side(p), _side(t)
+        if a == b:
+            continue
+        if (p.get("job_key") or None) != (t.get("job_key") or None):
+            continue                         # ลงงานใหม่/แก้งานในไฟล์ = เปลี่ยนได้
+        if (p.get("driver") or "") != (t.get("driver") or ""):
+            continue                         # เปลี่ยน/ถอนคนขับ = เปลี่ยนได้
+        try:
+            moved = _haversine_m(float(p["lat"]), float(p["lon"]), float(t["lat"]), float(t["lon"]))
+        except (TypeError, ValueError, KeyError):
+            continue                         # ไม่มีพิกัดรอบใดรอบหนึ่ง = ตัดสินไม่ได้
+        if moved > FLIP_MOVE_M:
+            continue                         # รถขยับจริง
+        if "ค้างเกิน" in (t.get("reason") or ""):
+            continue                         # กติกางานค้างเกิน 7 วัน (ตั้งใจ)
+        out.append({"t": now.isoformat(timespec="minutes"), "n": t.get("number"), "from": a, "to": b,
+                    "moved_m": round(moved), "job": t.get("job_key"), "loc": t.get("location_text"),
+                    "from_reason": (p.get("reason") or "")[:140], "to_reason": (t.get("reason") or "")[:140]})
+    return out
+
+
 def stale_realtime(prev_doc):
     """DTC ล่ม: สร้าง record แบบ DTC จากตำแหน่งล่าสุดในรอบก่อน (fleet-status.json เดิม)
     → classify ทำงานเหมือนเดิม (งานจากไฟล์น้ำมันยังอัปเดต) แต่ติด _stale: ไม่คิด ETA/นอกเส้นทาง
@@ -1458,6 +1501,19 @@ def main():
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
                       roster, drivers, gps2, prev_pos, future_dates, manual_groups,
                       prev_trips, history, now=now)
+    # ตัวจับผิด: ฝั่งเปลี่ยนทั้งที่รถไม่ขยับ + งาน/คนขับเดิม → เตือนใน log Actions + เก็บ flip-alerts.jsonl
+    try:
+        alerts = detect_flips(prev_doc, trucks, now)
+        for a in alerts:
+            print(f"::warning title=สถานะเปลี่ยนทั้งที่รถไม่ขยับ::{a['n']} {a['from']} → {a['to']}"
+                  f" ({a['loc']}) | {a['to_reason'][:90]}")
+        if alerts:
+            with open("flip-alerts.jsonl", "a", encoding="utf-8") as f:
+                for a in alerts:
+                    f.write(json.dumps(a, ensure_ascii=False) + "\n")
+        print(f"flip-alerts: +{len(alerts)}")
+    except Exception as e:
+        print("WARN: flip detector failed ->", repr(e))
     # สะสมประวัติ GPS2 (ไว้ทำกราฟน้ำมันรายเที่ยวของรถเจ้าที่ 2)
     try:
         if gps2:

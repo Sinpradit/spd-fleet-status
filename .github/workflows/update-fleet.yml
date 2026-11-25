@@ -90,7 +90,7 @@ jobs:
           # stage ทีละไฟล์เฉพาะที่มีอยู่จริง — run ที่ต่อคิวจะ checkout SHA เก่าตอนถูกสั่ง
           # ไฟล์ใหม่ (เช่น truck-groups.json) อาจยังไม่มี; git add รายการเดียวรวดจะล้มทั้งชุด
           # แล้วเหลือไฟล์ไม่ได้ stage -> rebase ตอน push ชนกันล้ม ("unstaged changes")
-          for f in fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json truck-groups.json; do
+          for f in fleet-status.json tracks.json gps2-history.jsonl route-track.jsonl assign-jobs.json truck-groups.json flip-alerts.jsonl; do
             if [ -e "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then
