@@ -1044,8 +1044,9 @@ def route_waypoints(route):
 
 def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
              roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None,
-             manual_groups=None, prev_trips=None, history=None, now=None):
+             manual_groups=None, prev_trips=None, history=None, now=None, prev_status=None):
     pois = pois or {}
+    prev_status = prev_status or {}       # รอบก่อน {เลขรถ: {job_key, category, reason}} — ให้งานทอยตอนจอดคงฝั่งเดิม
     future_dates = future_dates or set()
     prev_pos = prev_pos or {}
     home_st = pois.get(_norm(HOME_POI))
@@ -1212,10 +1213,23 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 cat, reason = "find_outbound", "งานทอย อยู่โซนบ้าน ว่างรับงานไป"
             elif zi >= 3:
                 cat, reason = "find_return", "งานทอย อยู่โซนกลาง/ตะวันออก รอรับงานกลับ"
-            elif head_out:
-                cat, reason = "find_return", "งานทอย มุ่งออก รอรับงานกลับ"
             else:
-                cat, reason = "find_outbound", "งานทอย มุ่งเข้าบ้าน ว่างรับงานไป"
+                # โซน 2 (เช่น บุรีรัมย์): ตัดสินจากทิศที่วิ่งจริง · จอดอยู่ = คงฝั่งเดิมของงานนี้
+                # (เดิมใช้เข็มทิศ → จอดนิ่งเข็มทิศแกว่ง สลับ หาไป↔หากลับ ทุก 15–30 นาที: 1571/2270/1268/3606)
+                ps = prev_status.get(num) or {}
+                keep = (mv is None and ps.get("job_key") == jk
+                        and str(ps.get("reason") or "").startswith("งานทอย")
+                        and ps.get("category") in ("find_outbound", "find_return"))
+                if keep:
+                    out_side = ps["category"] == "find_return"
+                elif mv in ("out", "home"):
+                    out_side = mv == "out"
+                else:                            # ยังไม่มีฝั่งเดิม + ไม่ขยับ → เข็มทิศ (ครั้งแรกครั้งเดียว)
+                    out_side = head_out
+                if out_side:
+                    cat, reason = "find_return", "งานทอย มุ่งออก รอรับงานกลับ"
+                else:
+                    cat, reason = "find_outbound", "งานทอย มุ่งเข้าบ้าน ว่างรับงานไป"
         elif dest_pending:
             # ลงแค่ลูกค้าขาไป = งานไปที่ยังไม่ลงปลายทาง → ฝั่งกำลังไปเสมอ
             # (ไม่รู้ปลายทาง = ตัดสิน "ถึงแล้ว/วกกลับ" ไม่ได้ · ลงปลายทางเมื่อไรก็กลับไปใช้ความจำเที่ยวตามปกติ)
@@ -1500,7 +1514,10 @@ def main():
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
                       roster, drivers, gps2, prev_pos, future_dates, manual_groups,
-                      prev_trips, history, now=now)
+                      prev_trips, history, now=now,
+                      prev_status={t["number"]: {"job_key": t.get("job_key"), "category": t.get("category"),
+                                                 "reason": t.get("reason")}
+                                   for t in _iter_trucks(prev_doc) if t.get("number")})
     # ตัวจับผิด: ฝั่งเปลี่ยนทั้งที่รถไม่ขยับ + งาน/คนขับเดิม → เตือนใน log Actions + เก็บ flip-alerts.jsonl
     try:
         alerts = detect_flips(prev_doc, trucks, now)

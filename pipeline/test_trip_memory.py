@@ -23,14 +23,15 @@ def check(name, cond, detail=""):
 
 
 def one(prov, pos, route, *, prev=None, heading=90, trips=None, history=None, date=TODAY,
-        num="9999", extra=None, future=None, now=None):
+        num="9999", extra=None, future=None, now=None, prev_status=None):
     rec = {"truck_name": f"70-{num}", "province_th": prov, "district_th": "อ.",
            "lat": pos[0], "lon": pos[1], "heading": heading, "gps_speed": 0,
            "status_name_th": "รถจอด", "time": "2026-11-20 12:00:00", **(extra or {})}
     out = run.classify([], [rec], {num: {"route": route, "date": date}}, {TODAY}, set(), POIS,
                        roster=[num], drivers={num: "ทดสอบ"}, gps2=None,
                        prev_pos={num: prev or pos}, future_dates=future or set(), manual_groups={},
-                       prev_trips=trips or {}, history=history or {}, now=now)
+                       prev_trips=trips or {}, history=history or {}, now=now,
+                       prev_status=prev_status)
     return out[0]
 
 
@@ -198,6 +199,27 @@ KR = run.trip_key(run.route_waypoints("ชัยวัฒนา-สมุทร�
 t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-สมุทรสาคร-ไทซิง-เมืองวัสดุ", date="18 พย 69", now=NOW,
         trips={"9999": {"key": KR, "max_km": 470.0, "reached": True, "seen": True}})
 check("ไป-กลับ ส่งครบแล้วกลับบ้าน = หางานไป เหมือนเดิม", t["category"] == "find_outbound", t["reason"])
+
+# 19) งานทอยในโซน 2 (บุรีรัมย์) จอดนิ่ง เข็มทิศแกว่ง — เดิมสลับ หาไป↔หากลับ ทุก 15–30 นาที (ตัวจับผิดเจอ 81 ครั้ง)
+BUR = C["บุรีรัมย์"]
+TOY = "ทอย บุรีรัมย์-เจียเม้ง"
+JKT = f"{TOY}|{TODAY}"
+
+
+def toy(heading, prev_cat=None, prev=None, job=JKT):
+    ps = {"9999": {"job_key": job, "category": prev_cat, "reason": "งานทอย xxx"}} if prev_cat else None
+    return one("บุรีรัมย์", BUR, TOY, heading=heading, prev=prev, prev_status=ps)
+
+
+check("ทอยจอดนิ่ง เดิมหาไป เข็มทิศชี้ออก = ยังหาไป (ไม่สลับ)", toy(270, "find_outbound")["category"] == "find_outbound")
+check("ทอยจอดนิ่ง เดิมหากลับ เข็มทิศชี้เข้าบ้าน = ยังหากลับ", toy(90, "find_return")["category"] == "find_return")
+t = toy(90, "find_outbound", prev=(BUR[0], BUR[1] + 0.05))        # รอบก่อนอยู่ใกล้บ้านกว่า = วิ่งออก
+check("ทอยวิ่งออกจริง = หางานกลับ (ไม่สนเข็มทิศ)", t["category"] == "find_return", t["reason"])
+t = toy(270, "find_return", prev=(BUR[0], BUR[1] - 0.05))         # รอบก่อนไกลบ้านกว่า = วิ่งเข้าบ้าน
+check("ทอยวิ่งเข้าบ้านจริง = หางานไป", t["category"] == "find_outbound", t["reason"])
+check("ทอยครั้งแรก (ไม่มีฝั่งเดิม) จอดนิ่ง = ใช้เข็มทิศแบบเดิม", toy(270)["category"] == "find_return")
+check("ทอยเปลี่ยนงาน = ไม่ยึดฝั่งของงานเก่า",
+      toy(270, "find_outbound", job="ทอย อื่น-ที่อื่น|19 พย 69")["category"] == "find_return")
 
 print("\nALL PASS" if not fails else f"\n{len(fails)} FAIL: {fails}")
 sys.exit(1 if fails else 0)
