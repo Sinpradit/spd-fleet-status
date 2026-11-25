@@ -641,6 +641,18 @@ def stale_pois(prev_doc):
     return out
 
 
+def prev_fuel(prev_doc):
+    """ไฟล์น้ำมันดึงไม่ได้: งานของแต่ละคัน (เส้นทาง+วันที่) จาก job_key ใน fleet-status.json รอบก่อน
+    -> รูปแบบเดียวกับ parse_fuel {เลขรถ: {route, date}}"""
+    out = {}
+    for t in _iter_trucks(prev_doc):
+        jk = t.get("job_key")
+        if t.get("number") and jk:
+            route, _, date = jk.partition("|")
+            out[t["number"]] = {"route": route, "date": date or None}
+    return out
+
+
 def prev_tracks_today(now):
     """DTC ล่ม: ใช้เส้นทางวันนี้ที่สร้างไว้ก่อนหน้า (ไม่ดึงประวัติใหม่) — ข้ามวัน = เริ่มว่าง"""
     today = now.strftime("%Y-%m-%d")
@@ -794,7 +806,9 @@ def drive_service(sa_json):
 
 
 # ---------- ปฏิทินงาน -> assign-jobs.json (หน้าจัดงานในแอป) ----------
-CALENDAR_ID = "benzsince1989@gmail.com"       # ปฏิทินหลักที่ลงงาน (แชร์ให้ SA แบบ read-only)
+# ปฏิทินหลักที่ลงงาน (แชร์ให้ SA แบบ read-only) — id คืออีเมลเจ้าของ → อ่านจาก secret CALENDAR_ID
+# (repo นี้ public — ห้ามเขียนอีเมลลงโค้ด)
+CALENDAR_ID = os.environ.get("CALENDAR_ID", "").strip()
 CAL_JOB_HOURS = (7, 21)                        # อ่านปฏิทินอัตโนมัติ 2 รอบ/วัน (เช้า/ค่ำ เวลาไทย)
 _KAN_RE = re.compile(r"\s+(\d+)\s*คัน\s*$")   # "... N คัน" ท้ายชื่อ
 _TAILNUM_RE = re.compile(r"(\d+)\s*$")        # เลขติดท้ายลูกค้า (เช่น "เตียเหลียง1")
@@ -842,6 +856,8 @@ def _job_from_event(ev):
 
 def fetch_calendar_jobs(sa_json, now):
     """อ่านปฏิทินหลัก เอาเฉพาะ event ที่มี 'N คัน' ตั้งแต่วันนี้ถึง +60 วัน."""
+    if not CALENDAR_ID:
+        raise RuntimeError("ไม่มี CALENDAR_ID (ตั้งใน GitHub secret) — ข้ามการอ่านปฏิทินรอบนี้")
     svc = calendar_service(sa_json)
     today = now.date().isoformat()
     tmin = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -1490,7 +1506,14 @@ def main():
         vehicles, realtime = [], []
         print(f"::warning title=DTC down::DTC ไม่ตอบ ({e!r:.150}) — ใช้ตำแหน่งล่าสุดจากรอบก่อน")
     svc = drive_service(sa_json)
-    fuel = parse_fuel(download_fuel(svc))
+    # ไฟล์น้ำมันดึง/อ่านไม่ได้ (เช่น Google ตอบ 500, หมดเวลา) → ใช้งานจากรอบก่อน ไม่ล้มทั้งรอบ
+    # (เดิมล้มครบ 4 ครั้ง → อีเมล "All jobs have failed" + ข้อมูลรถหยุดอัปเดต)
+    fuel_ok = True
+    try:
+        fuel = parse_fuel(download_fuel(svc))
+    except Exception as e:
+        fuel_ok, fuel = False, None
+        print(f"::warning title=ไฟล์น้ำมันดึงไม่ได้::{e!r:.150} — ใช้งานในไฟล์จากรอบก่อนแทน")
     pois = fetch_pois(token)
     roster, drivers = fetch_master(svc)      # รถ+คนขับจากไฟล์แม่แบบ (แก้ไฟล์ = อัปเดตเอง)
     manual_groups = load_manual_groups()     # กลุ่มที่ตั้งจากแอป (truck-groups.json)
@@ -1511,6 +1534,9 @@ def main():
     if not pois:                             # ดึงสถานีจาก DTC ไม่ได้ → สถานีที่รถเคยอยู่ในรอบก่อน
         pois = stale_pois(prev_doc)
         print(f"WARN: DTC POIs unavailable -> {len(pois)} stations from previous run")
+    if fuel is None:                         # ไฟล์น้ำมันดึงไม่ได้ → งานของแต่ละคันจากรอบก่อน
+        fuel = prev_fuel(prev_doc)
+        print(f"WARN: fuel file unavailable -> {len(fuel)} jobs from previous run")
     unknown = set()
     trucks = classify(vehicles, realtime, fuel, recent_dates, unknown, pois,
                       roster, drivers, gps2, prev_pos, future_dates, manual_groups,
@@ -1575,6 +1601,7 @@ def main():
     doc = build_doc(trucks, now)
     # สถานะ GPS DTC รอบนี้ · dtc_last_ok = รอบล่าสุดที่ DTC ตอบ (แอปรุ่นหน้าใช้ขึ้นแถบเตือนได้)
     doc["dtc_ok"] = dtc_ok
+    doc["fuel_ok"] = fuel_ok                 # false = ไฟล์น้ำมันดึงไม่ได้รอบนี้ (งานใช้ของรอบก่อน)
     doc["dtc_last_ok"] = (now.isoformat() if dtc_ok
                           else prev_doc.get("dtc_last_ok") or prev_doc.get("generated_at"))
     with open("fleet-status.json", "w", encoding="utf-8") as f:

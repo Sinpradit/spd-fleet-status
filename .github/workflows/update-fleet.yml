@@ -66,6 +66,7 @@ jobs:
         env:
           DTC_TOKEN: ${{ secrets.DTC_TOKEN }}
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+          CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
         run: |
           # DTC/OSRM/Drive drop connections in bursts. Retry the whole run a few
           # times spread over ~3 min so a brief upstream outage doesn't skip an update.

@@ -8,7 +8,7 @@ read those first when both repos are available.
 - `pipeline/run.py` — runs on GitHub Actions (`.github/workflows/update-fleet.yml`, ~every 15 min via
   `workflow_dispatch`). Pulls GPS (DTC + second GPS vendor), the fuel sheet and the truck roster,
   classifies each truck, and commits `fleet-status.json` (contract: `API_CONTRACT.md` in the workspace repo).
-- Secrets come only from Actions secrets (`DTC_TOKEN`, `GDRIVE_SA_KEY`, …).
+- Secrets come only from Actions secrets (`DTC_TOKEN`, `GDRIVE_SA_KEY`, `CALENDAR_ID`). Never write the calendar owner email (or any personal data) into code — this repo is public.
 
 ## Before pushing a change
 - Fresh machine / cloud session: `pip install openpyxl google-api-python-client google-auth` first
