@@ -13,6 +13,13 @@ read those first when both repos are available.
 ## Before pushing a change
 - Run the offline tests (no network): `python pipeline/test_trip_memory.py`, `pipeline/test_gps_lost.py`,
   `pipeline/test_dtc_down.py`, `pipeline/test_leg.py`, `pipeline/test_direction.py`.
-- Changing truck classification (`classify`): also replay real snapshots of `fleet-status.json` from git
-  history through the deployed code and the new code, and confirm only the intended trucks change.
+- Changing truck classification (`classify`): replay real published rounds through the new code and
+  compare with the deployed code — `python pipeline/replay_check.py 200 --vs origin/main`. Expect 0 detector
+  hits and differences only for the trucks you meant to change.
 - After pushing, wait for the next data round and check the published `fleet-status.json`.
+
+## Flip detector
+- Every round, `detect_flips()` flags trucks whose side changed while the truck didn't move (< 500 m) and its
+  job and driver stayed the same — a sign the rule decided on time or compass alone. Hits go to the Actions log
+  (`::warning`) and `flip-alerts.jsonl`. Check that file first when a truck's status looks wrong.
+- The first round after a classifier deploy also flags trucks the new code changed — confirm they are intended.
