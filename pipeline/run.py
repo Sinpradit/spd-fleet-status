@@ -652,6 +652,9 @@ def _gps_lost_suffix(rt, now=None):
 # ตอนนี้จำต่อเที่ยว (เก็บใน fleet-status.json ช่อง trip): ถึงปลายทาง/วกกลับแล้ว = ขากลับจนจบเที่ยว
 BASE_LATLON = (15.0990, 104.5748)   # สถานีฐานสินประดิษฐ์ (สำรองตอนดึง POI ไม่ได้)
 TURNBACK_KM = 25                    # ห่างบ้านลดจากจุดไกลสุดของเที่ยว (นอกโซนบ้าน) เกินนี้ = วกกลับแล้ว
+# ลงงานแล้วยังไม่ออก (รอโหลด/รอออกหลายวัน) = ยังฝั่งกำลังไป · เกินนี้ถือว่างานค้าง/ยกเลิก → กลับไปใช้กติกาวันที่เดิม
+# (≤ หน้าต่างประวัติ route-track 10 วัน → ความจำเที่ยวที่ตั้งจากประวัติยังครอบคลุมตั้งแต่วันลงงาน)
+PENDING_MAX_DAYS = 7
 
 
 def thai_date_iso(s):
@@ -662,6 +665,14 @@ def thai_date_iso(s):
         return f"{1957 + int(y):04d}-{mon:02d}-{int(d):02d}"
     except Exception:
         return None
+
+
+def job_age_days(fdate, now):
+    """อายุงาน (วัน) นับจากวันที่ลงงานถึงวันนี้ · ไม่รู้วันที่/ไม่ส่ง now = None"""
+    d0 = thai_date_iso(fdate) if fdate else None
+    if not d0 or now is None:
+        return None
+    return (now.replace(tzinfo=None).date() - datetime.strptime(d0, "%Y-%m-%d").date()).days
 
 
 def _dest_id(name):
@@ -1145,6 +1156,12 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                 st["seen"] = True
         reached = bool(st and st["reached"])
         known = bool(st and st["seen"])
+        # ลงงานแล้วยังไม่ออก: ความจำเที่ยวไม่เคยเห็นรถออกนอกโซนบ้านเลยตั้งแต่ลงงานนี้ (รอโหลด/รอออกหลายวัน)
+        # เดิมพ้น "วันนี้/เมื่อวาน" ก็ตกเป็น "ว่าง" ผิดฝั่ง (1300 ลง 23 พย ยังโหลดที่อุบล 25 พย)
+        age_d = job_age_days(fdate, now)
+        fresh_job = age_d is None or age_d <= PENDING_MAX_DAYS
+        not_departed = fresh_job and bool(st and not st["reached"] and not st["seen"] and not st["max_km"])
+        when = "" if is_recent or not fdate else f" (ลงงาน {' '.join(str(fdate).split()[:2])})"
 
         if is_toy:                               # งานทอย — ใช้ตำแหน่ง GPS ล้วน
             zi = idx_now if idx_now is not None else 5
@@ -1163,9 +1180,10 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
             zi = idx_now if idx_now is not None else 5
             if is_future:
                 cat, reason = "working", f"มีงาน {cust} รอออก ({' '.join(fdate.split()[:2])}) — ยังไม่ลงปลายทาง"
-            elif zi <= 1:
-                when = "" if is_recent or not fdate else f" (ลงงาน {' '.join(str(fdate).split()[:2])})"
+            elif zi <= 1 and fresh_job:
                 cat, reason = "working", f"รับงาน {cust} แล้ว กำลังจะออก{when} — ยังไม่ลงปลายทาง"
+            elif zi <= 1:                        # ลงไว้นานเกินจริงแต่ยังอยู่บ้าน = งานค้าง/ยกเลิก
+                cat, reason = "find_outbound", f"อยู่บ้าน งาน {cust}{when} ค้างเกิน {PENDING_MAX_DAYS} วัน ยังไม่ออก → ถือว่าว่าง"
             else:
                 cat, reason = "working", f"กำลังไปส่ง (งาน {cust} — ยังไม่ลงปลายทาง)"
         elif idx_now is None or idx_out is None:
@@ -1180,6 +1198,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                     cat, reason = "find_outbound", "ส่งของแล้ว กลับถึงบ้าน ว่าง (ประเมินจากโซน)"
                 elif zi <= 1 and is_future:      # งานลงล่วงหน้า = จองแล้ว รอออก
                     cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
+                elif zi <= 1 and not is_recent and not_departed:
+                    cat, reason = "working", f"รับงานขาไปแล้ว กำลังจะออก{when}"
                 elif zi <= 1 and not is_recent:
                     cat, reason = "find_outbound", "อยู่บ้าน งานเก่า → ว่าง (ประเมินจากโซน)"
                 elif reached:                    # วกกลับแล้ว ยังไม่มีงานกลับ
@@ -1194,6 +1214,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                         cat, reason = "working", "เพิ่งออกงาน (ประเมินจากโซน)"
                     elif is_future:              # งานลงล่วงหน้า = จองแล้ว รอออก
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
+                    elif not_departed:           # ลงงานแล้วยังไม่เคยออก = รอออก (ไม่ใช่ "ถึงบ้านแล้ว")
+                        cat, reason = "working", f"รับงานขาไปแล้ว กำลังจะออก{when}"
                     else:
                         cat, reason = "find_outbound", "ถึงบ้านแล้ว ว่าง (ประเมินจากโซน)"
                 elif known and not reached:      # เห็นเที่ยวนี้วิ่งมาแล้ว ยังไม่วกกลับ = ยังไปส่ง
@@ -1212,8 +1234,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                         cat, reason = "find_outbound", "ส่งของแล้ว กลับถึงบ้าน ว่างพร้อมรับงานไป"
                     elif is_future:
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
-                    elif is_recent:
-                        cat, reason = "working", "รับงานขาไปแล้ว กำลังจะออก"
+                    elif is_recent or not_departed:   # ลงหลายวันแต่ยังไม่เคยออก = ยังรอออก
+                        cat, reason = "working", f"รับงานขาไปแล้ว กำลังจะออก{when}"
                     else:
                         cat, reason = "find_outbound", "ว่าง พร้อมรับงานไป"
                 elif reached:                     # ส่งแล้ว กำลังวิ่งกลับเปล่า = ต้องหางานกลับ
@@ -1230,6 +1252,8 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
                         cat, reason = "working", f"เพิ่งออกงาน กำลังไปส่ง ({out_name})"
                     elif is_future:
                         cat, reason = "working", f"มีงาน {out_name} รอออก ({' '.join(fdate.split()[:2])})"
+                    elif not_departed:            # ลงงานแล้วยังไม่เคยออก (รอโหลด) ≠ "ขนกลับถึงบ้านแล้ว"
+                        cat, reason = "working", f"รับงานขาไปแล้ว กำลังจะออก{when}"
                     else:
                         cat, reason = "find_outbound", "ขนกลับถึงบ้านแล้ว ว่างรับงานไป"
                 elif reached or mv == "home":

@@ -23,14 +23,14 @@ def check(name, cond, detail=""):
 
 
 def one(prov, pos, route, *, prev=None, heading=90, trips=None, history=None, date=TODAY,
-        num="9999", extra=None, future=None):
+        num="9999", extra=None, future=None, now=None):
     rec = {"truck_name": f"70-{num}", "province_th": prov, "district_th": "อ.",
            "lat": pos[0], "lon": pos[1], "heading": heading, "gps_speed": 0,
            "status_name_th": "รถจอด", "time": "2026-11-20 12:00:00", **(extra or {})}
     out = run.classify([], [rec], {num: {"route": route, "date": date}}, {TODAY}, set(), POIS,
                        roster=[num], drivers={num: "ทดสอบ"}, gps2=None,
                        prev_pos={num: prev or pos}, future_dates=future or set(), manual_groups={},
-                       prev_trips=trips or {}, history=history or {})
+                       prev_trips=trips or {}, history=history or {}, now=now)
     return out[0]
 
 
@@ -160,6 +160,44 @@ t = one("สระบุรี", SAR, "ชัยวัฒนา-สมุทร�
 check("มาลงปลายทางทีหลัง ความจำช่วงลงแค่ลูกค้ายังใช้ได้ = ยังไปส่ง",
       t["leg"] == "out" and t["trip"]["seen"] and not t["trip"]["reached"], (t["reason"], t["trip"]))
 del POIS[run._norm(CUST["name"])]
+
+# 17) ลงงานไว้หลายวันแต่ยังไม่เคยออก (รอโหลดที่ต้นทาง) = ยังฝั่งกำลังไป (1300 ลง 23 พย ยังอยู่อุบล 25 พย)
+#     เดิม: พ้น "วันนี้/เมื่อวาน" + อยู่โซนบ้าน = "ว่าง พร้อมรับงานไป" ผิดฝั่ง
+from datetime import datetime, timedelta, timezone  # noqa: E402
+NOW = datetime(2026, 11, 20, 14, 0, tzinfo=timezone(timedelta(hours=7)))
+R13 = "กระชับมิตร อุบลธัญกิจ-กระชับมิตร-"
+K13 = run.trip_key(run.route_waypoints(R13), "18 พย 69")
+WAIT = {"9999": {"key": K13, "max_km": 0.0, "reached": False, "seen": False}}
+t = one("อุบลราชธานี", UBN, R13, date="18 พย 69", trips=WAIT, now=NOW)
+check("ลง 2 วันแล้วยังไม่เคยออก = ระหว่างงานไป + บอกวันลงงาน",
+      t["category"] == "working" and t["leg"] == "out" and "กำลังจะออก" in t["reason"]
+      and "ลงงาน 18 พย" in t["reason"], t["reason"])
+t = one("อุบลราชธานี", UBN, R13, date="18 พย 69", now=NOW)          # ความจำตั้งจากประวัติ (ไม่เคยออก)
+check("ไม่มีความจำเดิม + ประวัติไม่เคยออก = ระหว่างงานไป", t["leg"] == "out", t["reason"])
+t = one("อุบลราชธานี", UBN, R13, date="18 พย 69", now=NOW,
+        trips={"9999": {"key": K13, "max_km": 412.0, "reached": True, "seen": True}})
+check("ส่งแล้วกลับถึงบ้าน (งานเก่า) = หางานไป เหมือนเดิม", t["category"] == "find_outbound", t["reason"])
+t = one("อุบลราชธานี", UBN, R13, date="18 พย 69", now=NOW,
+        trips={"9999": {"key": K13, "max_km": 300.0, "reached": False, "seen": True}})
+check("เคยออกไปแล้ววนกลับ (ไม่รู้ว่าถึง) = กติกาเดิม หางานไป", t["category"] == "find_outbound", t["reason"])
+t = one("อุบลราชธานี", UBN, R13, date="10 พย 69", now=NOW,
+        trips={"9999": {"key": run.trip_key(run.route_waypoints(R13), "10 พย 69"),
+                        "max_km": 0.0, "reached": False, "seen": False}})
+check("ลงไว้เกิน 7 วันยังไม่ออก = ถือว่างานค้าง → หางานไป", t["category"] == "find_outbound", t["reason"])
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-", date="10 พย 69", now=NOW)
+check("ลงแค่ลูกค้าไว้เกิน 7 วันยังไม่ออก = หางานไป (บอกว่าค้าง)",
+      t["category"] == "find_outbound" and "ค้างเกิน 7 วัน" in t["reason"], t["reason"])
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-", date="17 พย 69", now=NOW)
+check("ลงแค่ลูกค้า 3 วัน (ไม่เกิน 7) = ยังฝั่งไป", t["leg"] == "out", t["reason"])
+
+# 18) งานไป-กลับลงวันนี้ รถยังจอดโหลดที่บ้าน (ยังไม่เคยออก) — เดิม "ขนกลับถึงบ้านแล้ว ว่าง" ผิด
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-สมุทรสาคร-ไทซิง-เมืองวัสดุ", heading=90, now=NOW)
+check("ไป-กลับ ลงวันนี้ ยังจอดที่บ้าน = กำลังจะออก (ไม่ใช่ขนกลับถึงบ้าน)",
+      t["category"] == "working" and t["leg"] == "out" and "กำลังจะออก" in t["reason"], t["reason"])
+KR = run.trip_key(run.route_waypoints("ชัยวัฒนา-สมุทรสาคร-ไทซิง-เมืองวัสดุ"), "18 พย 69")
+t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-สมุทรสาคร-ไทซิง-เมืองวัสดุ", date="18 พย 69", now=NOW,
+        trips={"9999": {"key": KR, "max_km": 470.0, "reached": True, "seen": True}})
+check("ไป-กลับ ส่งครบแล้วกลับบ้าน = หางานไป เหมือนเดิม", t["category"] == "find_outbound", t["reason"])
 
 print("\nALL PASS" if not fails else f"\n{len(fails)} FAIL: {fails}")
 sys.exit(1 if fails else 0)
