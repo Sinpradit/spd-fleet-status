@@ -585,6 +585,8 @@ def detect_flips(prev_doc, trucks, now):
         p = prev.get(t.get("number"))
         if not p:
             continue
+        if "manual" in (t.get("side_src"), p.get("side_src")):
+            continue                         # ผู้ใช้ย้ายเอง / การย้ายเองหมดผล = ตั้งใจ ไม่ใช่ระบบสลับเอง
         a, b = _side(p), _side(t)
         if a == b:
             continue
@@ -604,6 +606,91 @@ def detect_flips(prev_doc, trucks, now):
                     "moved_m": round(moved), "job": t.get("job_key"), "loc": t.get("location_text"),
                     "from_reason": (p.get("reason") or "")[:140], "to_reason": (t.get("reason") or "")[:140]})
     return out
+
+
+def recent_flip_alerts(now, path="flip-alerts.jsonl", hours=24, cap=30):
+    """เตือนของตัวจับผิดใน 24 ชม.ล่าสุด (ใหม่สุดก่อน) → fleet-status.json ช่อง flip_alerts ให้แอปโชว์กระดิ่ง"""
+    since = (now - timedelta(hours=hours)).isoformat(timespec="minutes")
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()[-400:]
+    except FileNotFoundError:
+        return []
+    for line in lines:
+        try:
+            a = json.loads(line)
+        except ValueError:
+            continue
+        if str(a.get("t") or "") < since:
+            continue
+        out.append({"id": f"{a.get('n')}|{a.get('t')}", "t": a.get("t"), "n": a.get("n"),
+                    "from": a.get("from"), "to": a.get("to"), "loc": a.get("loc"),
+                    "to_reason": (a.get("to_reason") or "")[:120]})
+    out.sort(key=lambda a: str(a["t"]), reverse=True)
+    return out[:cap]
+
+
+# ---------- ย้ายฝั่งเองจากแอป (truck-sides.json ที่ set_side.py เขียน) ----------
+# ทับผลจัดหมวดชั่วคราว จนกว่า: รถวิ่งเกิน SIDE_MOVE_M / งานในไฟล์น้ำมันเปลี่ยน / ครบ SIDE_MAX_H ชม.
+SIDE_MAX_H = 24
+SIDE_MOVE_M = 2000
+_SIDE_SET = {"find_out": ("find_outbound", None), "find_back": ("find_return", None),
+             "work_out": ("working", "out"), "work_back": ("working", "back")}
+
+
+def load_side_overrides(path="truck-sides.json"):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return dict(d.get("sides") or {}) if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_side_overrides(sides, path="truck-sides.json"):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"sides": dict(sorted(sides.items()))}, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def apply_side_overrides(trucks, sides, now):
+    """ใช้การย้ายเองกับรถในรอบนี้ → (sides ที่ยังมีผล, [ข้อความ log]) · แก้ trucks ในที่"""
+    keep, log = {}, []
+    by_num = {t.get("number"): t for t in trucks}
+    for num, ov in (sides or {}).items():
+        t = by_num.get(num)
+        spec = _SIDE_SET.get((ov or {}).get("side"))
+        if not t or not spec:
+            log.append(f"{num}: ทิ้ง (ไม่พบรถ/ฝั่งไม่รู้จัก)")
+            continue
+        try:
+            age_h = (now - datetime.fromisoformat(str(ov.get("at")))).total_seconds() / 3600
+        except (TypeError, ValueError):
+            age_h = SIDE_MAX_H + 1
+        moved = None
+        try:
+            moved = _haversine_m(float(ov["lat"]), float(ov["lon"]), float(t["lat"]), float(t["lon"]))
+        except (TypeError, ValueError, KeyError):
+            pass
+        if (ov.get("job_key") or None) != (t.get("job_key") or None):
+            log.append(f"{num}: หมดผล (งานในไฟล์เปลี่ยน)")
+            continue
+        if moved is not None and moved > SIDE_MOVE_M:
+            log.append(f"{num}: หมดผล (รถวิ่งแล้ว {moved / 1000:.1f} กม.)")
+            continue
+        if age_h > SIDE_MAX_H:
+            log.append(f"{num}: หมดผล (ครบ {SIDE_MAX_H} ชม.)")
+            continue
+        keep[num] = ov
+        cat, leg = spec
+        label = {"find_out": "หางานไป", "find_back": "หางานกลับ",
+                 "work_out": "ระหว่างงานไป", "work_back": "ระหว่างงานกลับ"}[ov["side"]]
+        orig = t.get("reason") or ""
+        t.update(category=cat, leg=leg, side_src="manual", eta_hours=None,
+                 reason=f"ย้ายเอง → {label} (จนรถวิ่ง/ลงงานใหม่/ครบ 24 ชม.) · ระบบว่า: {orig}")
+        log.append(f"{num}: ใช้ ({label})")
+    return keep, log
 
 
 def stale_realtime(prev_doc):
@@ -1544,6 +1631,16 @@ def main():
                       prev_status={t["number"]: {"job_key": t.get("job_key"), "category": t.get("category"),
                                                  "reason": t.get("reason")}
                                    for t in _iter_trucks(prev_doc) if t.get("number")})
+    # ย้ายฝั่งเองจากแอป (กระดิ่ง) → ทับผลจัดหมวดจนกว่ารถวิ่ง/ลงงานใหม่/ครบ 24 ชม.
+    try:
+        sides = load_side_overrides()
+        if sides:
+            kept, side_log = apply_side_overrides(trucks, sides, now)
+            print("side-overrides:", "; ".join(side_log))
+            if kept != sides:
+                save_side_overrides(kept)
+    except Exception as e:
+        print("WARN: side overrides failed ->", repr(e))
     # ตัวจับผิด: ฝั่งเปลี่ยนทั้งที่รถไม่ขยับ + งาน/คนขับเดิม → เตือนใน log Actions + เก็บ flip-alerts.jsonl
     try:
         alerts = detect_flips(prev_doc, trucks, now)
@@ -1602,6 +1699,11 @@ def main():
     # สถานะ GPS DTC รอบนี้ · dtc_last_ok = รอบล่าสุดที่ DTC ตอบ (แอปรุ่นหน้าใช้ขึ้นแถบเตือนได้)
     doc["dtc_ok"] = dtc_ok
     doc["fuel_ok"] = fuel_ok                 # false = ไฟล์น้ำมันดึงไม่ได้รอบนี้ (งานใช้ของรอบก่อน)
+    try:                                     # เตือนตัวจับผิด 24 ชม. → กระดิ่งในแอป
+        doc["flip_alerts"] = recent_flip_alerts(now)
+    except Exception as e:
+        print("WARN: flip_alerts for app failed ->", repr(e))
+        doc["flip_alerts"] = []
     doc["dtc_last_ok"] = (now.isoformat() if dtc_ok
                           else prev_doc.get("dtc_last_ok") or prev_doc.get("generated_at"))
     with open("fleet-status.json", "w", encoding="utf-8") as f:
