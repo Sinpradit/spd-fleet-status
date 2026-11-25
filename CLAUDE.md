@@ -11,6 +11,8 @@ read those first when both repos are available.
 - Secrets come only from Actions secrets (`DTC_TOKEN`, `GDRIVE_SA_KEY`, …).
 
 ## Before pushing a change
+- Fresh machine / cloud session: `pip install openpyxl google-api-python-client google-auth` first
+  (same packages the Actions workflows install; no secrets needed for the tests).
 - Run the offline tests (no network): `python pipeline/test_trip_memory.py`, `pipeline/test_gps_lost.py`,
   `pipeline/test_dtc_down.py`, `pipeline/test_leg.py`, `pipeline/test_direction.py`.
 - Changing truck classification (`classify`): replay real published rounds through the new code and
