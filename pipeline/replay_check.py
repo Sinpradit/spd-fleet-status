@@ -131,3 +131,8 @@ if old:
             continue
         shown.add(n)
         print(f"  {t} {n}: [{sa}] {ra[:60]}\n  {'':{len(t) + len(n) + 2}}→ [{sb}] {rb[:60]}")
+    side = [d for d in diffs if d[2] != d[4]]       # ต่างที่ "ฝั่ง" จริง (ไม่นับแค่ข้อความเหตุผล)
+    sper = collections.Counter(d[1] for d in side)
+    print(f"\nต่างที่ฝั่ง: {len(side)} คัน·รอบ · {dict(sper.most_common())}")
+    for t, n, sa, ra, sb, rb in side:
+        print(f"  {t} {n}: [{sa}] {ra[:50]}  →  [{sb}] {rb[:50]}")

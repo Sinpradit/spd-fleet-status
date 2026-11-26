@@ -1149,7 +1149,7 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
              roster=None, drivers=None, gps2=None, prev_pos=None, future_dates=None,
              manual_groups=None, prev_trips=None, history=None, now=None, prev_status=None):
     pois = pois or {}
-    prev_status = prev_status or {}       # รอบก่อน {เลขรถ: {job_key, category, reason}} — ให้งานทอยตอนจอดคงฝั่งเดิม
+    prev_status = prev_status or {}       # รอบก่อน {เลขรถ: {job_key, category, reason}} — ตัวจับผิด/ฝั่งเดิม
     future_dates = future_dates or set()
     prev_pos = prev_pos or {}
     home_st = pois.get(_norm(HOME_POI))
@@ -1310,29 +1310,15 @@ def classify(vehicles, realtime, fuel, recent_dates, unknown=None, pois=None,
         not_departed = fresh_job and bool(st and not st["reached"] and not st["seen"] and not st["max_km"])
         when = "" if is_recent or not fdate else f" (ลงงาน {' '.join(str(fdate).split()[:2])})"
 
-        if is_toy:                               # งานทอย — ใช้ตำแหน่ง GPS ล้วน
-            zi = idx_now if idx_now is not None else 5
-            if prov in HOME or zi <= 1:          # โซนบ้าน (รวมอำนาจเจริญ/ยโสธร/ร้อยเอ็ด) ไม่ใช้เข็มทิศ
-                cat, reason = "find_outbound", "งานทอย อยู่โซนบ้าน ว่างรับงานไป"
-            elif zi >= 3:
-                cat, reason = "find_return", "งานทอย อยู่โซนกลาง/ตะวันออก รอรับงานกลับ"
+        if is_toy:
+            # งานทอย = วิ่งสั้นแถวบ้าน (ถึงบุรีรัมย์ โซน 2) → ล็อก "หางานไป" เสมอ ไม่ใช้เข็มทิศ/ทิศวิ่ง
+            # (เดิมโซน 2 ตัดสินจากทิศ → จอดโหลดที่บุรีรัมย์แล้วโผล่ "หางานกลับ" · เจ้าของสั่งล็อก 26 พย 69)
+            # ยกเว้น "ทอยแทรก" = ทอยระหว่างเที่ยวยาว รถยังอยู่ไกล (โซน 3+ โคราชขึ้นไป — ทอยปกติไม่ไปถึง)
+            # → ยังอยู่ปลายทาง รอรับงานกลับ · ไม่รู้ตำแหน่ง = ถือเป็นทอยปกติ
+            if idx_now is not None and idx_now >= 3:
+                cat, reason = "find_return", "งานทอยแทรก (ระหว่างเที่ยวยาว) รถยังอยู่ไกล รอรับงานกลับ"
             else:
-                # โซน 2 (เช่น บุรีรัมย์): ตัดสินจากทิศที่วิ่งจริง · จอดอยู่ = คงฝั่งเดิมของงานนี้
-                # (เดิมใช้เข็มทิศ → จอดนิ่งเข็มทิศแกว่ง สลับ หาไป↔หากลับ ทุก 15–30 นาที: 1571/2270/1268/3606)
-                ps = prev_status.get(num) or {}
-                keep = (mv is None and ps.get("job_key") == jk
-                        and str(ps.get("reason") or "").startswith("งานทอย")
-                        and ps.get("category") in ("find_outbound", "find_return"))
-                if keep:
-                    out_side = ps["category"] == "find_return"
-                elif mv in ("out", "home"):
-                    out_side = mv == "out"
-                else:                            # ยังไม่มีฝั่งเดิม + ไม่ขยับ → เข็มทิศ (ครั้งแรกครั้งเดียว)
-                    out_side = head_out
-                if out_side:
-                    cat, reason = "find_return", "งานทอย มุ่งออก รอรับงานกลับ"
-                else:
-                    cat, reason = "find_outbound", "งานทอย มุ่งเข้าบ้าน ว่างรับงานไป"
+                cat, reason = "find_outbound", "งานทอย ว่างรับงานไป"
         elif dest_pending:
             # ลงแค่ลูกค้าขาไป = งานไปที่ยังไม่ลงปลายทาง → ฝั่งกำลังไปเสมอ
             # (ไม่รู้ปลายทาง = ตัดสิน "ถึงแล้ว/วกกลับ" ไม่ได้ · ลงปลายทางเมื่อไรก็กลับไปใช้ความจำเที่ยวตามปกติ)

@@ -200,26 +200,32 @@ t = one("อุบลราชธานี", UBN, "ชัยวัฒนา-ส�
         trips={"9999": {"key": KR, "max_km": 470.0, "reached": True, "seen": True}})
 check("ไป-กลับ ส่งครบแล้วกลับบ้าน = หางานไป เหมือนเดิม", t["category"] == "find_outbound", t["reason"])
 
-# 19) งานทอยในโซน 2 (บุรีรัมย์) จอดนิ่ง เข็มทิศแกว่ง — เดิมสลับ หาไป↔หากลับ ทุก 15–30 นาที (ตัวจับผิดเจอ 81 ครั้ง)
+# 19) งานทอย = ล็อก "หางานไป" เสมอ (เจ้าของสั่ง 26 พย 69) — เดิมโซน 2 (บุรีรัมย์) ตัดสินจากทิศ/เข็มทิศ
+#     → จอดโหลดที่บุรีรัมย์แล้วโผล่ "หางานกลับ" · ยกเว้นทอยแทรก (ระหว่างเที่ยวยาว รถอยู่โซน 3+)
 BUR = C["บุรีรัมย์"]
 TOY = "ทอย บุรีรัมย์-เจียเม้ง"
 JKT = f"{TOY}|{TODAY}"
 
 
-def toy(heading, prev_cat=None, prev=None, job=JKT):
+def toy(heading, prev_cat=None, prev=None, job=JKT, prov="บุรีรัมย์", pos=BUR, route=TOY):
     ps = {"9999": {"job_key": job, "category": prev_cat, "reason": "งานทอย xxx"}} if prev_cat else None
-    return one("บุรีรัมย์", BUR, TOY, heading=heading, prev=prev, prev_status=ps)
+    return one(prov, pos, route, heading=heading, prev=prev, prev_status=ps)
 
 
-check("ทอยจอดนิ่ง เดิมหาไป เข็มทิศชี้ออก = ยังหาไป (ไม่สลับ)", toy(270, "find_outbound")["category"] == "find_outbound")
-check("ทอยจอดนิ่ง เดิมหากลับ เข็มทิศชี้เข้าบ้าน = ยังหากลับ", toy(90, "find_return")["category"] == "find_return")
-t = toy(90, "find_outbound", prev=(BUR[0], BUR[1] + 0.05))        # รอบก่อนอยู่ใกล้บ้านกว่า = วิ่งออก
-check("ทอยวิ่งออกจริง = หางานกลับ (ไม่สนเข็มทิศ)", t["category"] == "find_return", t["reason"])
-t = toy(270, "find_return", prev=(BUR[0], BUR[1] - 0.05))         # รอบก่อนไกลบ้านกว่า = วิ่งเข้าบ้าน
-check("ทอยวิ่งเข้าบ้านจริง = หางานไป", t["category"] == "find_outbound", t["reason"])
-check("ทอยครั้งแรก (ไม่มีฝั่งเดิม) จอดนิ่ง = ใช้เข็มทิศแบบเดิม", toy(270)["category"] == "find_return")
-check("ทอยเปลี่ยนงาน = ไม่ยึดฝั่งของงานเก่า",
-      toy(270, "find_outbound", job="ทอย อื่น-ที่อื่น|19 พย 69")["category"] == "find_return")
+check("ทอยบุรีรัมย์ จอด เข็มทิศชี้ออก = หางานไป", toy(270)["category"] == "find_outbound")
+check("ทอยบุรีรัมย์ จอด เดิมหากลับ = กลับมาหางานไป (ไม่ยึดฝั่งเก่า)",
+      toy(90, "find_return")["category"] == "find_outbound")
+t = toy(270, "find_outbound", prev=(BUR[0], BUR[1] + 0.05))       # วิ่งออกจากบ้านจริง
+check("ทอยบุรีรัมย์ วิ่งออกจริง = ยังหางานไป (ล็อก)", t["category"] == "find_outbound", t["reason"])
+t = toy(90, prev=(BUR[0], BUR[1] - 0.05))                          # วิ่งเข้าบ้าน
+check("ทอยบุรีรัมย์ วิ่งเข้าบ้าน = หางานไป", t["category"] == "find_outbound", t["reason"])
+t = toy(270, prov="สุรินทร์", pos=C["สุรินทร์"])
+check("ทอยสุรินทร์ (โซน 1) = หางานไป", t["category"] == "find_outbound", t["reason"])
+t = toy(90, prov="นครราชสีมา", pos=C["นครราชสีมา"], route="ทอย โคราช-สีคิ้ว")
+check("ทอยแทรก ระหว่างเที่ยวยาว (โคราช โซน 3) = หางานกลับ",
+      t["category"] == "find_return" and "ทอยแทรก" in t["reason"], t["reason"])
+t = toy(270, prov="สระบุรี", pos=C["สระบุรี"], route="ทอย สระบุรี-นครหลวง")
+check("ทอยแทรก (สระบุรี โซน 4) = หางานกลับ", t["category"] == "find_return", t["reason"])
 
 print("\nALL PASS" if not fails else f"\n{len(fails)} FAIL: {fails}")
 sys.exit(1 if fails else 0)
