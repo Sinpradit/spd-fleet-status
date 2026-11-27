@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-27T12:34:58.023986+07:00",
+ "generated_at": "2026-11-27T12:49:59.351461+07:00",
  "jobs": [
   {
    "id": "pvmrrcsmapek1d84dsph7ub040",
@@ -8,6 +8,14 @@
    "destination": "แหลมฉบัง",
    "count": 2,
    "title": "เตียเหลียง2-แหลมฉบัง"
+  },
+  {
+   "id": "evm78mkihfqup21p6mrgkl37e0",
+   "date": "2026-12-02",
+   "customer": "กิจอุดม",
+   "destination": "urc",
+   "count": 1,
+   "title": "กิจอุดม1-urc"
   },
   {
    "id": "cna85oloabnrs5h3ocqrqb8if4",
